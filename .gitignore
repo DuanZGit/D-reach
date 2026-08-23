@@ -1,0 +1,17 @@
+# Runtime / secrets
+.env
+.env.*
+.agent-reach/
+.bilibili-cli/
+.xiaohongshu-cli/
+*.local
+
+# System / temp
+*.log
+/tmp/
+.DS_Store
+Thumbs.db
+
+# Git metadata (if accidentally copied)
+.git/
+*.gitkeep.tmp
