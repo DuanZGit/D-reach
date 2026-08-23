@@ -14,7 +14,7 @@ agent-reach doctor --json
 > **PRoot / Minis 环境下注意：** `opencli`（OpenCLI 后端）是桌面工具，本环境未安装。
 > 无需 `opencli` 的替代路径：
 > - 雪球公开数据可用 `curl` 抓 `xueqiu.com` 页面，或用 `jina_reader`（`curl https://r.jina.ai/<xueqiu_url>`）
-> - 行情查询优先走 `gushen` 技能（A股/美股）：`python3 /var/minis/skills/gushen/tools/cn_market.py a <code>`
+> - 行情查询优先走独立 skill `gushen`（需另行安装）：`cn_market.py a <code>`
 > - URL 已知时直接 `scrape`（走 agent-reach 统一爬取入口）
 
 ## OpenCLI（桌面已有 Chrome 登录态时优先）
@@ -52,11 +52,11 @@ agent-reach configure --from-browser chrome --platform xueqiu
 
 ```bash
 # 1) A股/美股实时行情（gushen）
-python3 /var/minis/skills/gushen/tools/cn_market.py a 600519          # A股
-python3 /var/minis/skills/gushen/tools/cn_market.py quote usNVDA usQQQ # 美股
+<gushen_path>/tools/cn_market.py a 600519          # A股（gushen 需自行安装）
+<gushen_path>/tools/cn_market.py quote usNVDA usQQQ # 美股
 
 # 2) 雪球页面/社区内容（jina_reader 或统一爬取）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py scrape "https://xueqiu.com/S/SH600519"
+python3 scripts/unified_entry.py scrape "https://xueqiu.com/S/SH600519"
 
 # 3) 雪球热帖（公开 JSON API）
 curl -s "https://xueqiu.com/query/v1/statuses/hot/listV3.json" \

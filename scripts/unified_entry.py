@@ -32,7 +32,19 @@ def _run(cmd: list[str], timeout: int = 120) -> dict:
 
 
 def _exec_baidu_search(query: str) -> dict:
-    script = "/var/minis/skills/baiduaisearchwithquota/scripts/quota_manager.py"
+    """百度千帆搜索。脚本来自独立 skill baiduaisearchwithquota，
+    路径通过 BAIDU_QF_SCRIPT 环境变量指定，或按常见位置自动探测。"""
+    import os as _os
+    candidates = [
+        _os.environ.get("BAIDU_QF_SCRIPT", ""),
+        "/var/minis/skills/baiduaisearchwithquota/scripts/quota_manager.py",
+        str(Path.home() / ".d-reach" / "vendor" / "baiduaisearchwithquota" / "scripts" / "quota_manager.py"),
+    ]
+    script = next((c for c in candidates if c and Path(c).exists()), None)
+    if not script:
+        return {"error": "baidu_script_not_found",
+                "message": "Set BAIDU_QF_SCRIPT to baiduaisearchwithquota/scripts/quota_manager.py, "
+                           "or install the baiduaisearchwithquota skill."}
     try:
         out = subprocess.check_output([sys.executable, script, "dispatch", "search", query],
                                       text=True, timeout=120)

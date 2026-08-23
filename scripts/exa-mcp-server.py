@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Minimal MCP server for Exa web search."""
+"""Minimal MCP server for Exa web search.
+
+[备用] 仅当运行环境没有 Minis MCP（minis-mcp-cli）时使用。
+正常情况下 agent-reach / D-Reach 通过 `minis-mcp-cli call exa ...` 调用 Exa，
+无需启动本脚本。需要 EXA_API_KEY 环境变量。
+"""
 import json
 import os
 import sys

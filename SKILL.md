@@ -83,14 +83,14 @@ metadata:
 
 ```bash
 # 1. 检查额度状态
-python3 /var/minis/skills/d-reach/scripts/quota_manager.py status
+python3 scripts/quota_manager.py status
 
 # 2. 统一入口（自动配额检查 + 路由 + fallback）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py search "查询内容"
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py scrape "https://example.com"
+python3 scripts/unified_entry.py search "查询内容"
+python3 scripts/unified_entry.py scrape "https://example.com"
 
 # 3. 手动重置（测试用）
-python3 /var/minis/skills/d-reach/scripts/quota_manager.py reset
+python3 scripts/quota_manager.py reset
 ```
 
 ### 免费额度限制
@@ -119,14 +119,14 @@ python3 /var/minis/skills/baiduaisearchwithquota/scripts/quota_manager.py dispat
 python3 /var/minis/skills/baiduaisearchwithquota/scripts/smart_search.py search '搜索内容'
 
 # 统一搜索入口（自动配额检查 + 路由 + fallback）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py search '搜索内容'
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py search 'query' --lang en
+python3 scripts/unified_entry.py search '搜索内容'
+python3 scripts/unified_entry.py search 'query' --lang en
 
 # 统一爬取入口（自动配额检查 + 路由 + fallback）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py scrape 'https://example.com'
+python3 scripts/unified_entry.py scrape 'https://example.com'
 
 # 检查所有服务额度
-python3 /var/minis/skills/d-reach/scripts/quota_manager.py status
+python3 scripts/quota_manager.py status
 
 # Exa 网页搜索（通过 MCP）
 minis-mcp-cli call exa web_search_exa --input '{"query":"query","numResults":5}'
@@ -153,7 +153,7 @@ bili video BVxxx                                             # B站视频详情
 bili search "query" --type video -n 5                        # B站搜索
 
 # V2EX 热门
-curl -s "https://www.v2ex.com/api/topics/hot.json" -H "User-Agent: agent-reach/1.0"
+curl -s "https://www.v2ex.com/api/topics/hot.json" -H "User-Agent: d-reach/1.0"
 ```
 
 ## 环境检查
@@ -170,7 +170,7 @@ minis-mcp-cli ping deepwiki
 
 ## 工作区规则
 
-**不要在 agent workspace 创建文件。** 使用 `/tmp/` 存放临时输出，`~/.agent-reach/` 存放持久数据。
+**不要在 agent workspace 创建文件。** 使用 `/tmp/` 存放临时输出，`~/.d-reach/` 存放持久数据。
 
 ## 详细文档
 
@@ -189,21 +189,14 @@ minis-mcp-cli ping deepwiki
 
 本仓库还保留了从实际使用中沉淀出的独立 skill；遇到对应场景时优先阅读：
 
-- [小红书（XHS）增强](extensions/agent-reach-xhs/SKILL.md) — `xsec_token`、短链接重定向、浏览器 Cookie 登录、错误码与限速
-- [Twitter/X 增强](extensions/agent-reach-twitter/SKILL.md) — Cookie 环境变量认证、X Article、结构化归档
-- [Twitter/X Cookie 参考](extensions/agent-reach-twitter/references/twitter-cli-cookie-workflow.md) — `auth_token` / `ct0` 的安全传入方式
+- [小红书（XHS）增强](extensions/d-reach-xhs/SKILL.md) — `xsec_token`、短链接重定向、浏览器 Cookie 登录、错误码与限速
+- [Twitter/X 增强](extensions/d-reach-twitter/SKILL.md) — Cookie 环境变量认证、X Article、结构化归档
+- [Twitter/X Cookie 参考](extensions/d-reach-twitter/references/twitter-cli-cookie-workflow.md) — `auth_token` / `ct0` 的安全传入方式
 - [知乎与通用网页](references/web.md) — 当前保留的知乎读取路径是 Jina Reader；未找到独立的已验证知乎扩展
-
-## 配置渠道
-
-如果某个 channel 需要配置，获取安装指南：
-https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md
-
-用户只需提供 cookies，其他配置由 agent 完成。
 
 ## 触发边界（必读）
 
-**只有用户明确提到搜索/查询/爬取动词时，才激活 agent-reach。**
+**只有用户明确提到搜索/查询/爬取动词时，才激活 d-reach。**
 - 触发词：`搜 / 查 / 找 / search / 搜索 / 查一下 / 帮我搜`
 - 也包含：`读一下 / 打开这个 / 看看链接`
 - 也包含：`爬 / 抓 / 抓取 / scrape / 提取 / 提取数据`
@@ -213,4 +206,4 @@ https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md
 - **gushen**：只有用户明确提到 `gushen`、`股票`、`行情`、`基金`、`投资`、`A股`、`美股`，才走 gushen。**普通搜索不走 gushen。**
 - **research**：只有用户明确说 `research XXX`，才走 research。**普通搜索不走 research。**
 
-**简单说：没提到 DK/gushen/research，就不触发它们。agent-reach 只管通用搜索。**
+**简单说：没提到 DK/gushen/research，就不触发它们。d-reach 只管通用搜索。**
