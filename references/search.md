@@ -23,14 +23,14 @@
 
 ```bash
 # 统一搜索（自动配额+路由+fallback）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py search "关键词" zh   # 中文
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py search "query" en  # 英文
+python3 scripts/unified_entry.py search "关键词" zh   # 中文
+python3 scripts/unified_entry.py search "query" en  # 英文
 
 # Firecrawl Developer Index（编程专用，免 API key）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py developer "how to configure retries in tokio"
+python3 scripts/unified_entry.py developer "how to configure retries in tokio"
 
 # Firecrawl Research Index 论文（免费，需 FIRECRAWL_API_KEY）
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py research "LLM agent memory"
+python3 scripts/unified_entry.py research "LLM agent memory"
 ```
 
 ---
@@ -86,7 +86,7 @@ curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20conf
 
 **经统一入口（推荐）：**
 ```bash
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py developer "你想要的问题"
+python3 scripts/unified_entry.py developer "你想要的问题"
 ```
 
 **适用场景：** 写代码、查 GitHub issue/PR、读 README、理解开源项目、找最佳实践。
@@ -107,7 +107,7 @@ python3 /var/minis/skills/d-reach/scripts/unified_entry.py developer "你想要�
 
 **经统一入口：**
 ```bash
-python3 /var/minis/skills/d-reach/scripts/unified_entry.py research "multi-agent systems"
+python3 scripts/unified_entry.py research "multi-agent systems"
 ```
 
 ---
@@ -137,6 +137,10 @@ minis-mcp-cli call exa web_search_exa --input '{"query":"AI agent","numResults":
 ---
 
 ## 百度千帆 AI（v3.0，27 个工具统一管理）
+
+> **依赖说明**：脚本来自独立 skill `baiduaisearchwithquota`，非本仓库自带。
+> 安装后通过环境变量 `BAIDU_QF_SCRIPT` 指向其 `scripts/quota_manager.py`，
+> 或放在 `/var/minis/skills/baiduaisearchwithquota/` 位置自动探测。
 
 百度千帆提供中文智能搜索、百科、热搜、内容生成、文库、多媒体、知识图谱、电商等 **27 个官方工具**，统一通过 `quota_manager.py` 调度。
 

@@ -16,8 +16,8 @@
 | [`SKILL.md`](SKILL.md) | 顶层路由器（触发词、路由表、配额门控说明、零配置命令） |
 | [`references/`](references/) | 场景文档：`search` / `scrape` / `web` / `social` / `career` / `dev` / `video` / `finance` |
 | [`scripts/`](scripts/) | 统一执行器 + 配额门控 + 配额管理器 |
-| [`extensions/agent-reach-xhs`](extensions/agent-reach-xhs) | 小红书实战增强 |
-| [`extensions/agent-reach-twitter`](extensions/agent-reach-twitter) | Twitter/X 实战增强 |
+| [`extensions/d-reach-xhs`](extensions/d-reach-xhs) | 小红书实战增强 |
+| [`extensions/d-reach-twitter`](extensions/d-reach-twitter) | Twitter/X 实战增强 |
 
 ## 快速使用
 
