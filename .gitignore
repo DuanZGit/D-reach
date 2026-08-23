@@ -15,3 +15,8 @@ Thumbs.db
 # Git metadata (if accidentally copied)
 .git/
 *.gitkeep.tmp
+
+# Secrets plaintext (never commit)
+secrets.json
+d-reach-secrets*
+*.pw
