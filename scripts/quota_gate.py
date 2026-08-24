@@ -23,9 +23,9 @@ ROUTING = {
     "search_en":          ("exa",           ["brightdata", "baidu_search", "jina_reader"]),
     "search_code":        ("github",        ["deepwiki", "exa"]),  # gh CLI 免费无限
     # 爬虫
-    "scrape_single":      ("brightdata",    ["jina_reader", "firecrawl"]),
-    "scrape_batch":       ("brightdata",    ["firecrawl"]),
-    "scrape_structured":  ("brightdata",    ["firecrawl"]),
+    "scrape_single":      ("brightdata",    ["jina_reader"]),
+    "scrape_batch":       ("brightdata",    []),
+    "scrape_structured":  ("brightdata",    ["jina_reader"]),
     "scrape_browser":     ("brightdata",    ["browser_use"]),
     # 社交（CLI 免费但需登录态）
     "social_xhs":         ("xhs",           ["browser_use"]),
@@ -37,16 +37,20 @@ ROUTING = {
     "ecommerce":          ("brightdata",    ["jina_reader"]),
     "business_intel":     ("brightdata",    ["jina_reader"]),
     # 代码
-    "npm_package":        ("brightdata",    ["jina_reader", "firecrawl"]),
-    "pypi_package":       ("brightdata",    ["jina_reader", "firecrawl"]),
-    "github_file":        ("brightdata",    ["gh", "jina_reader"]),
+    "npm_package":        ("brightdata",    ["jina_reader"]),
+    "pypi_package":       ("brightdata",    ["jina_reader"]),
+    "github_file":        ("github",        ["deepwiki", "jina_reader"]),
     # 视频
     "youtube_sub":        ("yt-dlp",        ["jina_reader"]),
     "bilibili_sub":       ("yt-dlp",        ["jina_reader"]),
     # 网页阅读
-    "web_general":        ("jina_reader",   ["brightdata", "firecrawl"]),
-    "web_wechat":         ("brightdata",    ["firecrawl", "browser_use"]),
+    "web_general":        ("brightdata",   ["browser_use"]),
+    "web_wechat":         ("brightdata",    ["browser_use"]),
 }
+
+# 由独立技能维护真实额度的服务，不在 D-Reach 再扣一次。
+# 这样避免 D-Reach 的 quota.json 与百度技能自己的官方计数器双扣。
+DELEGATED_QUOTA_SERVICES = {"baidu_search"}
 
 # ── 决策函数 ────────────────────────────────────────────────────────────────
 
@@ -65,6 +69,10 @@ def gate(scenario: str, count: int = 1) -> dict:
                 "fallback_chain": [], "quota_snapshot": {}}
 
     primary, fallbacks = ROUTING[scenario]
+
+    # 百度配额由 baiduaisearchwithquota 自己持久化和门控；D-Reach 只负责选路，避免双扣。
+    if primary in DELEGATED_QUOTA_SERVICES:
+        return {"ok": True, "service": primary, "reason": "delegated quota: baiduaisearchwithquota", "fallback_chain": fallbacks, "quota_snapshot": {}}
 
     # 尝试主服务
     ok, reason = mgr.consume(primary, count)
