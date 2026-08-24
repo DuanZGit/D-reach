@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -31,14 +32,79 @@ def _run(cmd: list[str], timeout: int = 120) -> dict:
         return {"error": str(e)}
 
 
+def _exec_bili_search(query: str, count: int = 5, page: int = 1) -> dict:
+    """Search Bilibili through the installed bili-cli.
+
+    Use an absolute fallback path because non-login shells (including DSH tool
+    calls) may not source ~/.bashrc and therefore omit ~/.local/bin.
+    """
+    binary = shutil.which("bili") or "/root/.local/bin/bili"
+    if not Path(binary).exists():
+        return {"ok": False, "service": "bili-cli", "error": "bili_not_installed"}
+    result = _run([binary, "search", query, "--type", "video",
+                   "--page", str(max(1, page)), "--max", str(max(1, count)), "--json"], timeout=60)
+    result["service"] = "bili-cli"
+    return result
+
+
+def _exec_xhs_search(query: str, count: int = 10, page: int = 1,
+                     sort: str = "general") -> dict:
+    """Search Xiaohongshu through xhs-cli and preserve xsec_token results."""
+    binary = shutil.which("xhs") or "/root/.local/bin/xhs"
+    if not Path(binary).exists():
+        return {"ok": False, "service": "xhs-cli", "error": "xhs_not_installed"}
+    result = _run([binary, "search", query, "--sort", sort,
+                   "--page", str(max(1, page)), "--json"], timeout=60)
+    result["service"] = "xhs-cli"
+    if result.get("ok") and isinstance(result.get("data"), dict):
+        items = result["data"].get("items", [])
+        if isinstance(items, list):
+            result["data"]["items"] = items[:max(1, count)]
+    return result
+
+
+def _exec_xhs_read(note: str, xsec_token: str | None = None) -> dict:
+    """Read one Xiaohongshu note; token must come from search/feed output."""
+    binary = shutil.which("xhs") or "/root/.local/bin/xhs"
+    if not Path(binary).exists():
+        return {"ok": False, "service": "xhs-cli", "error": "xhs_not_installed"}
+    cmd = [binary, "read", note, "--json"]
+    if xsec_token:
+        cmd.extend(["--xsec-token", xsec_token])
+    result = _run(cmd, timeout=60)
+    result["service"] = "xhs-cli"
+    return result
+
+
+def social_search(platform: str, query: str, count: int = 5,
+                  page: int = 1) -> dict:
+    """Search Bilibili/Xiaohongshu without consuming web-search quota."""
+    platform = platform.lower().replace("哔哩哔哩", "bilibili").replace("小红书", "xiaohongshu")
+    if platform in {"bili", "bilibili", "b站"}:
+        return _exec_bili_search(query, count, page)
+    if platform in {"xhs", "xiaohongshu", "xhs-cli"}:
+        return _exec_xhs_search(query, count, page)
+    return {"ok": False, "error": "unsupported_social_platform",
+            "message": "supported platforms: bilibili, xiaohongshu"}
+
+
+def social_read(platform: str, note: str, xsec_token: str | None = None) -> dict:
+    """Read a Xiaohongshu note using the token paired with search results."""
+    platform = platform.lower().replace("小红书", "xiaohongshu")
+    if platform in {"xhs", "xiaohongshu", "xhs-cli"}:
+        return _exec_xhs_read(note, xsec_token)
+    return {"ok": False, "error": "unsupported_social_read",
+            "message": "read currently supports xiaohongshu"}
+
+
 def _exec_baidu_search(query: str) -> dict:
     """百度千帆搜索。脚本来自独立 skill baiduaisearchwithquota，
     路径通过 BAIDU_QF_SCRIPT 环境变量指定，或按常见位置自动探测。"""
     import os as _os
     candidates = [
         _os.environ.get("BAIDU_QF_SCRIPT", ""),
-        "/var/minis/skills/baiduaisearchwithquota/scripts/quota_manager.py",
-        str(Path.home() / ".d-reach" / "vendor" / "baiduaisearchwithquota" / "scripts" / "quota_manager.py"),
+        "/var/minis/skills/baiduaisearchwithquota/scripts/smart_search.py",
+        str(Path.home() / ".d-reach" / "vendor" / "baiduaisearchwithquota" / "scripts" / "smart_search.py"),
     ]
     script = next((c for c in candidates if c and Path(c).exists()), None)
     if not script:
@@ -46,7 +112,7 @@ def _exec_baidu_search(query: str) -> dict:
                 "message": "Set BAIDU_QF_SCRIPT to baiduaisearchwithquota/scripts/quota_manager.py, "
                            "or install the baiduaisearchwithquota skill."}
     try:
-        out = subprocess.check_output([sys.executable, script, "dispatch", "search", query],
+        out = subprocess.check_output([sys.executable, script, "search", query],
                                       text=True, timeout=120)
         return {"ok": True, "service": "baidu_search", "data": out.strip()}
     except Exception as e:
@@ -87,8 +153,17 @@ def _exec_jina_fetch(target: str, is_query: bool = False) -> dict:
         return {"error": str(e), "service": "jina_reader"}
 
 
+def _paid_firecrawl_allowed() -> bool:
+    """Firecrawl 免费计划有 1000 credits/月；显式 opt-in 才允许消耗 credits。"""
+    return os.environ.get("DREACH_ALLOW_PAID", "").lower() in {"1", "true", "yes"}
+
+
 def _exec_firecrawl_scrape(url: str) -> dict:
-    """Firecrawl 单页抓取（耗 1 credit）。"""
+    """Firecrawl 单页抓取（显式允许后可能消耗 credits）。"""
+    if not _paid_firecrawl_allowed():
+        return {"ok": False, "service": "firecrawl", "error": "paid_service_disabled",
+                "message": "Firecrawl 默认关闭以保护免费额度；明确允许后设置 DREACH_ALLOW_PAID=1。"}
+
     try:
         from firecrawl import Firecrawl
         app = Firecrawl()
@@ -265,6 +340,33 @@ if __name__ == "__main__":
     elif cmd == "firecrawl_search":
         q = sys.argv[2] if len(sys.argv) > 2 else ""
         print(json.dumps(_exec_firecrawl_search(q), indent=2, ensure_ascii=False) if q
+              else json.dumps({"error": "query required"}))
+    elif cmd == "social_search":
+        platform = sys.argv[2] if len(sys.argv) > 2 else ""
+        q = sys.argv[3] if len(sys.argv) > 3 else ""
+        count = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+        page = int(sys.argv[5]) if len(sys.argv) > 5 else 1
+        print(json.dumps(social_search(platform, q, count, page),
+                         indent=2, ensure_ascii=False) if q
+              else json.dumps({"error": "query required"}))
+    elif cmd == "social_read":
+        platform = sys.argv[2] if len(sys.argv) > 2 else ""
+        note = sys.argv[3] if len(sys.argv) > 3 else ""
+        token = sys.argv[4] if len(sys.argv) > 4 else None
+        print(json.dumps(social_read(platform, note, token),
+                         indent=2, ensure_ascii=False) if note
+              else json.dumps({"error": "note required"}))
+    elif cmd == "search_bili":
+        q = sys.argv[2] if len(sys.argv) > 2 else ""
+        count = int(sys.argv[3]) if len(sys.argv) > 3 else 5
+        print(json.dumps(social_search("bilibili", q, count),
+                         indent=2, ensure_ascii=False) if q
+              else json.dumps({"error": "query required"}))
+    elif cmd == "search_xhs":
+        q = sys.argv[2] if len(sys.argv) > 2 else ""
+        count = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+        print(json.dumps(social_search("xiaohongshu", q, count),
+                         indent=2, ensure_ascii=False) if q
               else json.dumps({"error": "query required"}))
     elif cmd == "scrape":
         url = sys.argv[2] if len(sys.argv) > 2 else ""
