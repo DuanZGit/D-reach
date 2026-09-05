@@ -4,7 +4,7 @@
 
 | 平台 | 去哪 |
 |------|------|
-| 小红书 | `../extensions/d-reach-xhs/SKILL.md`（**当前 cookie 过期，需 `xhs login`**） |
+| 小红书 | `../extensions/d-reach-xhs/SKILL.md`（cookie 会周期性过期，恢复流程见顶层 `SKILL.md`） |
 | Twitter/X | `../extensions/d-reach-twitter/SKILL.md`（**本机 `twitter` 是 npm 同名假货，静默 exit 0** → 先用 `browser_use`） |
 | B站 | `SKILL.md` 的「B站 / 小红书 铁律」+ `video.md` |
 | 抖音 | 无可用通道（原 mcporter douyin 未配置）→ `browser_use` |

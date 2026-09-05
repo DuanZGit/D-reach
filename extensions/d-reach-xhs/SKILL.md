@@ -23,9 +23,12 @@ channel for D-Reach. Canonical routing lives in the parent `SKILL.md`.
 - Cookies stored at `~/.xiaohongshu-cli/cookies.json`
 - Login status: `xhs status` (verbose: `xhs -v status`)
 - If expired: `xhs login --cookie-source chrome` or `xhs login --qrcode`
-- **当前状态（2026-09-05 实测）**：cookie 已过期，`xhs search` 直接返回
-  `{"ok":false,"error":{"code":"not_authenticated","message":"Session expired..."}}`
-  —— 需要用户本人扫码登录，agent 无法代跑。别连续重试烧配额。
+- **Cookie 会周期性过期**。症状：`xhs search` 返回
+  `{"ok":false,"error":{"code":"not_authenticated","message":"Session expired..."}}`。
+  **不要指望 `xhs login --qrcode`** —— 扫码/确认都能过，但最后一步会被风控要验证码
+  （`NeedVerifyError: Captcha required type=124`），cookie 不落盘。
+  实测可用的恢复路径是借 Minis 内置浏览器登录后把 cookie 灌回本文件上述四个字段，
+  完整步骤见顶层 `../../SKILL.md` 的「通道现状」。
 
 ## Critical: xsec_token Restriction
 
