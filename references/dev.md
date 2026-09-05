@@ -23,10 +23,12 @@ gh run view <run-id> --repo owner/repo --log-failed  # 只看失败日志
 
 ```bash
 minis-mcp-cli tools deepwiki                       # 看有哪些工具 + 入参 schema
-minis-mcp-cli call deepwiki ask_question --input '{"repo":"owner/repo","question":"这个仓库的并发模型是怎么实现的？"}'
+minis-mcp-cli call deepwiki ask_question --input '{"repoName":"owner/repo","question":"这个仓库的并发模型是怎么实现的？"}'
 ```
 
-- `repo` 用 `owner/repo` 或关键词，**不要传 `https://github.com/...` 全 URL**（会被拒）。
+- 参数名是 **`repoName`**（不是 `repo`），实测 2026-09-05；接受 `owner/repo` 字符串或最多 10 个的数组。
+- 另有 `read_wiki_structure`（目录树）、`read_wiki_contents`（全文）两个工具。
+- 未索引的仓库直接回 `Repository not found`（私有仓库默认没索引）→ 立刻降级 `gh`，不要重试。
+- **不要传 `https://github.com/...` 全 URL**（会被拒）。
 - 返回的是已索引的文档摘要（顶部有 `Last indexed:` 日期），不是实时文件列表；
   要精确文件内容 / 最新 commit → `gh api`。
-- 未索引的仓库直接降级到 `gh`，不要反复重试。
