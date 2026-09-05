@@ -42,7 +42,7 @@ metadata:
 | 仓库语义问答 | DeepWiki MCP `ask_question` | gh CLI 读源码 | — |
 | B站 | bili CLI ⏱ | browser_use ⏱（**不要 yt-dlp，会被 412 拦**） | — |
 | YouTube 字幕 | browser_use（yt-dlp 本机未跑通，见 video.md） | 隧道+cookies 的 yt-dlp | — |
-| 小红书 | xhs CLI ⏱（**当前 cookie 过期，需 `xhs login`**） | browser_use ⏱ | — |
+| 小红书 | xhs CLI ⏱ | browser_use ⏱ | — |
 | Twitter/X | browser_use ⏱（本机 `twitter` 是 npm 同名假货，见下） | 装 Python 版 twitter-cli | — |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
 | 需要登录的站点 | browser_use ⏱ | — | — |
@@ -55,7 +55,23 @@ metadata:
 > （duanz.xin 是 DDNS，IP 每天变，钉了隔天就砖）。
 
 - ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
-- ⚠️ `xhs`：cookie 过期，报 `not_authenticated` → 要用户 `xhs login` 扫码后才能用。
+- ✅ `xhs`：2026-09-05 已重新登录（search / comments 实测通）。**cookie 会周期性过期**，
+  报 `not_authenticated / Session expired` 时按下面恢复 —— 注意 `xhs login --qrcode` **走不通**：
+  扫码和确认都能过，但最后一步 `_complete_confirmed_session` 会被风控要验证码
+  （`NeedVerifyError: Captcha required type=124`），纯 HTTP 流程解不了，cookie 不落盘。
+  可用的是**借内置浏览器登录，再把 cookie 灌回 CLI**：
+
+  ```bash
+  # 1) browser_use: set_user_agent desktop_chrome → navigate https://www.xiaohongshu.com/explore
+  #    （移动端 UA 不发二维码，必须桌面版；模态框没自动弹就点侧栏「登录」）
+  # 2) 把 img.qrcode-img 的截图区域裁出来给用户扫（dpr=4，坐标×4；必须补 ≥4 模块白边，
+  #    否则扫码器因缺 quiet zone 拒识）。别手抄 base64 —— 会抄成垃圾。
+  # 3) 用户确认后：browser_use get_cookies keywords="web_session a1 webId gid"
+  # 4) 写 ~/.xiaohongshu-cli/cookies.json（扁平结构，不是嵌套）：
+  #    {"a1":…,"webId":…,"gid":…,"web_session":…,"saved_at":<unix秒>}  权限 600
+  # 5) xhs status 验证 authenticated: true
+  ```
+
 - ❌ `twitter`：PATH 上的是 npm `twitter-cli@0.0.2`（filter stream 玩具），**不是**文档里的 Python v0.8.5。任何子命令都只打印一行 usage 并 **exit 0** —— 静默假成功，别当成"没结果"。要真用得 `pipx install twitter-cli` 并确认 `which twitter` 不再指向 `/usr/local/bin`。
 - ⚠️ Reddit 公开 JSON：数据中心 IP 被拉黑，返回 **200 + "Blocked" HTML**（不是 403），别误读成空结果 → 换 browser_use / BrightData。
 
