@@ -1,74 +1,59 @@
 # D-Reach
 
-统一搜索、爬虫、网页读取、社交媒体、代码仓库、视频字幕的顶层路由器（Agent Skill）。
+搜索 / 爬取 / 网页读取 / 社交媒体 / 代码仓库 / 视频字幕的统一路由（Agent Skill）。
 
-**整合通道**：百度千帆、Exa、BrightData MCP、Firecrawl（Developer Index / Research Index / scrape）、Jina Reader、gh CLI、DeepWiki、yt-dlp、xhs、bili、twitter、rdt、browser_use 等。
+**通道**：百度千帆、Exa、BrightData、Firecrawl（Developer / Research Index）、Jina Reader、
+gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browser_use。
 
-**核心特性**：
-- 🔀 统一路由：用户只说「搜 / 查 / 读 / 爬」，自动选最优通道
-- 🛡️ 免费额度防护：所有带免费上限的服务调用前自动检查配额，超限自动降级到免费替代，**绝不进入付费模式**
-- 🧩 顶层 Skill：`SKILL.md` + `references/`（按场景阅读）+ `scripts/`（配额门控 + 统一执行器）
+**设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
+唯一的代码是 `scripts/quota.py`（约 100 行），只做一件事：记免费额度，防止越过免费线产生费用。
 
-## 内容结构
-
-| 路径 | 作用 |
-| --- | --- |
-| [`SKILL.md`](SKILL.md) | 顶层路由器（触发词、路由表、配额门控说明、零配置命令） |
-| [`references/`](references/) | 场景文档：`search` / `scrape` / `web` / `social` / `career` / `dev` / `video` / `finance` |
-| [`scripts/`](scripts/) | 统一执行器 + 配额门控 + 配额管理器 |
-| [`extensions/d-reach-xhs`](extensions/d-reach-xhs) | 小红书实战增强 |
-| [`extensions/d-reach-twitter`](extensions/d-reach-twitter) | Twitter/X 实战增强 |
-
-## 快速使用
+## 用法
 
 ```bash
-# 统一搜索（自动配额+路由+fallback）
-python3 scripts/unified_entry.py search "关键词" zh   # 中文
-python3 scripts/unified_entry.py search "query" en    # 英文
+# 看额度
+python3 scripts/quota.py status
 
-# Firecrawl Developer Index（编程专用，免 API key）
-python3 scripts/unified_entry.py developer "how to configure retries in tokio"
+# 占用一次（超限 exit 1，于是可以 `use x || 换备选`）
+python3 scripts/quota.py use brightdata
 
-# Firecrawl Research Index（学术论文，免费）
-python3 scripts/unified_entry.py research "LLM agent memory"
-
-# 统一爬取
-python3 scripts/unified_entry.py scrape "https://example.com"
-
-# 查所有通道额度
-python3 scripts/quota_manager.py status
+# 清零
+python3 scripts/quota.py reset brightdata
 ```
 
-### 免费额度一览
+调用方式全部在 [`SKILL.md`](SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
 
-| 通道 | 免费额度 | 超限 fallback |
+## 免费额度一览
+
+| 通道 | 免费额度 | 超限降级 |
 | --- | --- | --- |
-| BrightData MCP | 5,000 / 月 | Jina Reader → Firecrawl |
+| BrightData Unlocker | 5,000 / 月 | Jina → browser_use |
+| Exa | ~1,000 / 月 | 百度千帆 → BrightData |
 | Firecrawl Free | 1,000 credits / 月 | BrightData → Jina |
-| Firecrawl Research Index | 免费（不耗 credits） | - |
-| Firecrawl Developer Index | 免 API key | - |
-| 百度千帆搜索 | 400 / 日 | BrightData → Exa |
-| Exa | 1,000 / 月 | BrightData → 百度 |
-| Jina Reader | 300 / 日 | BrightData |
-| Brave | 2,000 / 月 | BrightData |
-| Serper | 2,500 / 月 | BrightData |
+| Firecrawl Research Index | 免费（不耗 credits，需 key） | — |
+| Firecrawl Developer Index | 免 API key | — |
+| 百度千帆搜索 | 400 / 日（**由 baiduaisearchwithquota 自己记账**） | BrightData → Exa |
+| Jina Reader | 300 / 日（限流） | BrightData |
+| gh / yt-dlp / DeepWiki / v2ex | 免费无限 | — |
 
 ## 环境变量
 
 | 变量 | 用途 |
 | --- | --- |
-| `BRIGHTDATA_APITOKEN` | BrightData MCP（5,000 次/月免费） |
-| `FIRECRAWL_API_KEY` | Firecrawl（1,000 credits/月；Research Index 免费需 key） |
+| `BRIGHTDATA_APITOKEN` | BrightData REST（5,000 次/月） |
 | `EXA_API_KEY` | Exa 搜索 |
-| `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` | Twitter/X（浏览器 Cookie） |
+| `FIRECRAWL_API_KEY` | Firecrawl Research Index / 提高 Developer Index 限流 |
+| `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` | twitter-cli 登录态 |
 
-## 安全规则
+## 安全
 
-- `.env` 与真实凭据目录已由 [`.gitignore`](.gitignore) 排除；
-- 本仓库不包含任何真实 Cookie、Token、账号或浏览器会话数据；
-- 示例中的 `...`、`<auth_token>`、`<ct0>` 均为占位符，不可替换为真实凭据后提交；
-- 密钥一律通过环境变量引用（`$$VARNAME`），不硬编码。
+- 密钥一律走环境变量（`$$VARNAME`），不硬编码、不写进 markdown。
+- `secrets.enc` 是**已加密**的凭据包（AES-256-CBC + PBKDF2 600k），含 API key 与
+  bilibili / xhs cookie；密码不入库，丢失不可恢复。加解密方式见 [`SECRETS.md`](SECRETS.md)。
+- `secrets.json`（明文）已被 `.gitignore` 排除。若仓库转公开，**必须先删 `secrets.enc` 并清历史**。
 
 ## 说明
 
-D-Reach 基于开源 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 的本地定制超集，额外整合 BrightData MCP、Firecrawl 全能力、统一配额防护系统，以及经本机验证的小红书 / B站 / Twitter 登录态流程。
+基于开源 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 的本地定制超集，
+按本机实况裁剪：删除了未注册的 MCP 通道与统一执行器，保留经本机验证的
+小红书 / B站 / Twitter 登录态流程与踩坑记录。

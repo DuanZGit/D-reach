@@ -14,14 +14,12 @@ metadata:
 
 ## Overview
 
-The `xhs` CLI (installed via `pipx install xiaohongshu-cli`) is part of the
-**agent-reach** skill collection. The Claude Code version lives at
-`~/.claude/skills/d-reach/` — read its `references/social.md` for the
-canonical upstream docs if this skill is stale.
+The `xhs` CLI (installed via `pipx install xiaohongshu-cli`) is the Xiaohongshu
+channel for D-Reach. Canonical routing lives in the parent `SKILL.md`.
 
 ## Prerequisites
 
-- `xhs` CLI: `/Users/roucher/.local/bin/xhs`
+- `xhs` CLI on PATH (this box: `/usr/local/bin/xhs`)
 - Cookies stored at `~/.xiaohongshu-cli/cookies.json`
 - Login status: `xhs status` (verbose: `xhs -v status`)
 - If expired: `xhs login --cookie-source chrome` or `xhs login --qrcode`
@@ -122,8 +120,9 @@ Images are typically `.webp` format. Use `vision_analyze` for OCR/text extractio
 4. **Rate limiting:** Batch operations need 2-3s delays. High-frequency
    requests trigger CAPTCHAs.
 
-5. **POST operations (post/comment/like)** may fail with 406 in v0.6.x due to
-   signing issues. Downgrade to v0.3.5 if needed: `pipx install xiaohongshu-cli==0.3.5`
+5. **⚠️ 必须 xhs-cli ≥ 0.6.4**：0.4.0/0.5.x 读评论被 406 风控拦死（本机实证 2026-08-26）。
+   升级：`pip install --user --no-deps xiaohongshu-cli==0.6.4 xhshow`。
+   `xhs comments` 优先于 `xhs read`——`read` 易触发 captcha，`comments` 更稳且支持 `--all` 分页。
 
 ## Comments Extraction
 
@@ -156,37 +155,7 @@ xhs status                      # Check login
 xhs login --cookie-source auto  # Re-login from browser cookies
 ```
 
-## Agent-Reach Ecosystem
+## 相关通道
 
-The `xhs` CLI is part of a larger toolkit at `~/.claude/skills/d-reach/`.
-Other platforms include: Twitter (`twitter-cli`), Reddit (`rdt-cli`),
-Douyin (MCP server), Bilibili (`yt-dlp`), V2EX (public API), YouTube, etc.
-The Claude Code skill has full references in `references/social.md`,
-`references/web.md`, `references/video.md`, etc.
-
-See `references/social.md` in this skill for canonical upstream docs covering
-all platforms (XHS, Twitter/X, Douyin, Weibo, Bilibili, V2EX, Reddit).
-
-### Twitter/X (twitter-cli)
-
-```bash
-# Install
-pipx install twitter-cli  # ensure v0.8.5+
-
-# Auth — set env vars from browser cookies
-export TWITTER_AUTH_TOKEN="..."
-export TWITTER_CT0="..."
-
-# Stable commands
-twitter feed -n 20 --json
-twitter tweet URL_OR_ID --json
-twitter article URL_OR_ID --json
-twitter user-posts @username -n 20 --json
-twitter user @username --json
-
-# May fail — Twitter changes GraphQL frequently
-twitter search "query" -n 10
-```
-
-> **IP风控**: 不要在VPS/数据中心IP频繁调用，有封号风险。使用住宅代理或本地环境。
-> **search可能失效**: Twitter频繁修改GraphQL端点，search可能返回404。如遇此情况，用`twitter feed`替代。
+其它平台不在本文件里：Twitter/X 见 `../d-reach-twitter/SKILL.md`，
+抖音/微博/V2EX/Reddit 见 `../../references/social.md`，路由总表见顶层 `SKILL.md`。
