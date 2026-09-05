@@ -2,21 +2,6 @@
 
 雪球股票行情、搜索与热门内容。行情可能延迟，不构成投资建议。
 
-## 先检查状态
-
-```bash
-agent-reach doctor --json
-```
-
-`xueqiu.active_backend` 有值时按该后端使用；值为 `null` 只表示 Doctor 没有完成
-实时内容验证。雪球需要已登录会话或最小 Cookie，不能把 HTTP 400 当成股票不存在。
-
-> **PRoot / Minis 环境下注意：** `opencli`（OpenCLI 后端）是桌面工具，本环境未安装。
-> 无需 `opencli` 的替代路径：
-> - 雪球公开数据可用 `curl` 抓 `xueqiu.com` 页面，或用 `jina_reader`（`curl https://r.jina.ai/<xueqiu_url>`）
-> - 行情查询优先走独立 skill `gushen`（需另行安装）：`cn_market.py a <code>`
-> - URL 已知时直接 `scrape`（走 agent-reach 统一爬取入口）
-
 ## OpenCLI（桌面已有 Chrome 登录态时优先）
 
 ```bash
@@ -37,7 +22,8 @@ OpenCLI 只复用用户已经存在且明确控制的浏览器会话。不要自
 雪球所需的最小 Cookie：
 
 ```bash
-agent-reach configure --from-browser chrome --platform xueqiu
+# 本机没有 agent-reach CLI。要 cookie 就用 browser_use：
+# 先在浏览器登录雪球，再 browser_use get_cookies（keywords: xq_a_token）
 ```
 
 该配置只读取并保存 `xq_a_token`，不会顺带采集其他平台 Cookie。
@@ -56,7 +42,9 @@ agent-reach configure --from-browser chrome --platform xueqiu
 <gushen_path>/tools/cn_market.py quote usNVDA usQQQ # 美股
 
 # 2) 雪球页面/社区内容（jina_reader 或统一爬取）
-python3 scripts/unified_entry.py scrape "https://xueqiu.com/S/SH600519"
+curl -s -X POST https://api.brightdata.com/request -H "Authorization: Bearer $BRIGHTDATA_APITOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"zone":"mcp_unlocker","format":"raw","data_format":"markdown","url":"https://xueqiu.com/S/SH600519"}'
 
 # 3) 雪球热帖（公开 JSON API）
 curl -s "https://xueqiu.com/query/v1/statuses/hot/listV3.json" \

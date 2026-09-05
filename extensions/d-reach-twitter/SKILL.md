@@ -16,13 +16,13 @@ metadata:
 
 Use `twitter-cli` from the agent-reach toolkit for reading X/Twitter timelines, tweets, replies, X Articles, and user posts. This is the cookie/session-based path, separate from the official-API `x-cli` workflow.
 
-Verified locally on this machine with `twitter, version 0.8.5` at `~/.local/bin/twitter`.
+Verified locally with `twitter, version 0.8.5`（本机在 `/usr/local/bin/twitter`，直接在 PATH 上）。
 
 ## Prerequisites
 
 ```bash
 pipx install twitter-cli  # or pipx upgrade twitter-cli
-~/.local/bin/twitter --version
+twitter --version
 ```
 
 Authentication uses browser cookie values as environment variables:
@@ -216,13 +216,3 @@ final_url = urllib.request.urlopen(req, timeout=10).geturl()
 5. **Do not store secrets.** Never save `auth_token`, `ct0`, or full Cookie headers into wiki/raw markdown.
 
 6. **IP/account risk.** Avoid high-frequency scraping, followers/following expansion, or use from VPS/datacenter IPs. Prefer local/residential network and delays for batches.
-
-## Verification Checklist
-
-- [ ] `twitter --version` works and is v0.8.5+.
-- [ ] Auth env vars are set only in shell/session, not persisted into content.
-- [ ] `twitter feed -n 5 --json` succeeds before deeper operations.
-- [ ] For a tweet archive, `twitter tweet ID --json` was captured.
-- [ ] For an X Article archive, `twitter article SOURCE_TWEET_ID --json` was captured.
-- [ ] Markdown frontmatter parses and contains source URLs, IDs, metrics, and saved date.
-- [ ] File is read back after writing to confirm the article body is complete.
