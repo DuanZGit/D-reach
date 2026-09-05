@@ -4,8 +4,8 @@
 
 | 平台 | 去哪 |
 |------|------|
-| 小红书 | `../extensions/d-reach-xhs/SKILL.md` |
-| Twitter/X | `../extensions/d-reach-twitter/SKILL.md` |
+| 小红书 | `../extensions/d-reach-xhs/SKILL.md`（**当前 cookie 过期，需 `xhs login`**） |
+| Twitter/X | `../extensions/d-reach-twitter/SKILL.md`（**本机 `twitter` 是 npm 同名假货，静默 exit 0** → 先用 `browser_use`） |
 | B站 | `SKILL.md` 的「B站 / 小红书 铁律」+ `video.md` |
 | 抖音 | 无可用通道（原 mcporter douyin 未配置）→ `browser_use` |
 
@@ -37,5 +37,6 @@ curl -s -A "$UA" "https://www.reddit.com/r/SUB/hot.json?limit=20"               
 curl -s -A "$UA" "https://www.reddit.com/r/SUB/comments/ID.json"                # 帖子+评论
 ```
 
-> 本机没有 `rdt` CLI。数据中心 IP 常被 403 拦 → 换 `browser_use` 或 BrightData。
-> 取字段用 jq：`| jq '.data.children[].data | {title,url,num_comments,selftext:(.selftext[:200])}'`
+> 本机没有 `rdt` CLI。**2026-09-05 实测：数据中心 IP 被拉黑，返回 200 + 一个 "Blocked" HTML 页**
+> （不是 403，别当成"搜索无结果"）→ 换 `browser_use` 或 BrightData 抓。
+> 能通时用 jq 取字段：`| jq '.data.children[].data | {title,url,num_comments,selftext:(.selftext[:200])}'`

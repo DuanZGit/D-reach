@@ -32,20 +32,27 @@ metadata:
 
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆 ⏱(自带计数器) | BrightData ⏱ | Jina |
+| 中文搜索 | 百度千帆（自带计数器） | BrightData ⏱ | Jina ⏱ |
 | 英文/技术搜索 | Exa ⏱ | 百度千帆 | BrightData ⏱ |
 | 编程文档/issue | Firecrawl Developer Index（免 key） | Exa ⏱ | gh CLI |
 | 学术论文 | Firecrawl Research Index（需 key，免费） | Exa ⏱ | — |
-| 网页抓取（反爬） | BrightData ⏱ | Jina | browser_use |
-| 批量网页抓取 | BrightData（循环单抓，≤10） | Jina | — |
+| 网页抓取（反爬） | BrightData ⏱ | Jina ⏱ | browser_use ⏱ |
+| 批量网页抓取 | BrightData（循环单抓，≤10）⏱ | Jina ⏱ | — |
 | GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Exa |
 | 仓库语义问答 | DeepWiki MCP `ask_question` | gh CLI 读源码 | — |
-| B站 | bili CLI ⏱ | browser_use（**不要 yt-dlp，会被 412 拦**） | — |
+| B站 | bili CLI ⏱ | browser_use ⏱（**不要 yt-dlp，会被 412 拦**） | — |
 | YouTube 字幕 | yt-dlp（免费无限） | — | — |
-| 小红书 | xhs CLI ⏱（需 cookie） | browser_use | — |
-| Twitter/X | twitter-cli ⏱ | browser_use | — |
+| 小红书 | xhs CLI ⏱（**当前 cookie 过期，需 `xhs login`**） | browser_use ⏱ | — |
+| Twitter/X | browser_use ⏱（本机 `twitter` 是 npm 同名假货，见下） | 装 Python 版 twitter-cli | — |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
 | 需要登录的站点 | browser_use ⏱ | — | — |
+
+### 通道现状（2026-09-05 实测，沙箱出口只到 ug）
+
+- ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
+- ⚠️ `xhs`：cookie 过期，报 `not_authenticated` → 要用户 `xhs login` 扫码后才能用。
+- ❌ `twitter`：PATH 上的是 npm `twitter-cli@0.0.2`（filter stream 玩具），**不是**文档里的 Python v0.8.5。任何子命令都只打印一行 usage 并 **exit 0** —— 静默假成功，别当成"没结果"。要真用得 `pipx install twitter-cli` 并确认 `which twitter` 不再指向 `/usr/local/bin`。
+- ⚠️ Reddit 公开 JSON：数据中心 IP 被拉黑，返回 **200 + "Blocked" HTML**（不是 403），别误读成空结果 → 换 browser_use / BrightData。
 
 ## 通道命令
 
@@ -106,6 +113,9 @@ python3 /var/minis/skills/d-reach/scripts/quota.py reset brightdata
 ```
 
 计数文件 `~/.agent-reach/quota.json`，跨日/跨月自动归零。
+⏱ = 调用前 `quota.py use <svc>`。例外：**百度千帆由它自己的计数器记账**（别双扣）；
+Firecrawl 的两个 Index REST 端点免费不记账，只有走 SDK 抓取才 `use firecrawl`；
+gh / yt-dlp / DeepWiki / V2EX 免费无限，不记账。
 BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDATA_APITOKEN" https://api.brightdata.com/account/usage`。
 
 ## 工作区

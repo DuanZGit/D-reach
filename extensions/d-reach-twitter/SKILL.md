@@ -10,13 +10,27 @@ metadata:
     related_skills: [xitter, wiki-management]
 ---
 
-# X/Twitter Reading via agent-reach twitter-cli
+# X/Twitter Reading via Python `twitter-cli` (v0.8.5)
+
+> ⚠️ **本机（Minis 沙箱）当前不可用。** `/usr/local/bin/twitter` 是 npm 上的
+> `twitter-cli@0.0.2`（"pump results from the twitter filter stream"，2013 年玩具），
+> 与本文档描述的 Python 包**同名不同物**。任何子命令都只打印
+> `usage: twitter --filter="#hash,#tags" --regex="something"` 然后 **exit 0** ——
+> 静默假成功，不是"没结果"。
+>
+> 要用先装：`pipx install twitter-cli`（Python 包，v0.8.5+），
+> 再 `which twitter` 确认指向 `~/.local/bin/twitter` 而不是 `/usr/local/bin/twitter`
+> （PATH 里 `/usr/local/bin` 在前，可能需要 `hash -r` 或用绝对路径）。
+> 装不了就直接走 `browser_use`。
 
 ## Overview
 
-Use `twitter-cli` from the agent-reach toolkit for reading X/Twitter timelines, tweets, replies, X Articles, and user posts. This is the cookie/session-based path, separate from the official-API `x-cli` workflow.
+Use `twitter-cli` (Python, `twitter` on PATH) for reading X/Twitter timelines, tweets,
+replies, X Articles, and user posts. This is the cookie/session-based path, separate
+from the official-API `x-cli` workflow.
 
-Verified locally with `twitter, version 0.8.5`（本机在 `/usr/local/bin/twitter`，直接在 PATH 上）。
+Commands below were verified on the author's machine with `twitter, version 0.8.5`;
+**not re-verified in this sandbox** (see warning above).
 
 ## Prerequisites
 

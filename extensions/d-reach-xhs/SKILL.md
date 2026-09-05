@@ -19,10 +19,13 @@ channel for D-Reach. Canonical routing lives in the parent `SKILL.md`.
 
 ## Prerequisites
 
-- `xhs` CLI on PATH (this box: `/usr/local/bin/xhs`)
+- `xhs` CLI on PATH (this box: `/usr/local/bin/xhs`, verified v0.6.4)
 - Cookies stored at `~/.xiaohongshu-cli/cookies.json`
 - Login status: `xhs status` (verbose: `xhs -v status`)
 - If expired: `xhs login --cookie-source chrome` or `xhs login --qrcode`
+- **当前状态（2026-09-05 实测）**：cookie 已过期，`xhs search` 直接返回
+  `{"ok":false,"error":{"code":"not_authenticated","message":"Session expired..."}}`
+  —— 需要用户本人扫码登录，agent 无法代跑。别连续重试烧配额。
 
 ## Critical: xsec_token Restriction
 
