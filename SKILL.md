@@ -41,7 +41,7 @@ metadata:
 | GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Exa |
 | 仓库语义问答 | DeepWiki MCP `ask_question` | gh CLI 读源码 | — |
 | B站 | bili CLI ⏱ | browser_use ⏱（**不要 yt-dlp，会被 412 拦**） | — |
-| YouTube 字幕 | yt-dlp（免费无限） | — | — |
+| YouTube 字幕 | browser_use（yt-dlp 本机未跑通，见 video.md） | 隧道+cookies 的 yt-dlp | — |
 | 小红书 | xhs CLI ⏱（**当前 cookie 过期，需 `xhs login`**） | browser_use ⏱ | — |
 | Twitter/X | browser_use ⏱（本机 `twitter` 是 npm 同名假货，见下） | 装 Python 版 twitter-cli | — |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |

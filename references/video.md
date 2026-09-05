@@ -5,6 +5,13 @@ B站取证铁律（字幕 + 评论区必须都看）见顶层 `SKILL.md`。
 
 ## YouTube (yt-dlp)
 
+> **本机现状（2026-09-05 实测，未跑通）**：直连 `www.youtube.com` 连接超时（沙箱出口在国内 IP，被墙）；
+> 走 ug 隧道（`ssh -N -D 127.0.0.1:1080 ug` + `--proxy socks5h://127.0.0.1:1080`，需 `pip install pysocks`）
+> 能打到 player API，但 yt-dlp 卡在 `The page needs to be reloaded`（YouTube SSAB 实验，要浏览器 cookie），
+> `web_embedded` 客户端则回 `This video is unavailable`。
+> **要 YouTube 内容：优先 `browser_use` 打开页面取字幕轨，或让用户提供 cookies.txt。**
+> 下面的命令在能直连 YouTube 的机器上是对的。
+
 ```bash
 yt-dlp --dump-json "URL"                       # 元数据
 yt-dlp --dump-json "ytsearch5:query"           # 搜索

@@ -2,19 +2,19 @@
 
 雪球股票行情、搜索与热门内容。行情可能延迟，不构成投资建议。
 
-## OpenCLI（桌面已有 Chrome 登录态时优先）
+## OpenCLI（**本机不可用**：需要桌面 Chrome + Bridge 扩展）
+
+> 2026-09-05 实测 `opencli xueqiu whoami` → `BROWSER_CONNECT / Browser Bridge extension not connected`。
+> Minis 沙箱没有 Chrome，这条通道在这里必然失败 —— 直接跳到下面的「本环境推荐路径」。
+> 在装了 Chrome 且登录过雪球的桌面机上，它是最省事的：
 
 ```bash
-# 验证当前登录态
-opencli xueqiu whoami -f yaml
-
-# 股票搜索与实时行情
+opencli xueqiu whoami -f yaml                  # 验证登录态
 opencli xueqiu search "英伟达" -f yaml
-opencli xueqiu stock NVDA -f yaml
-
-# 热门内容与热门股票
-opencli xueqiu hot -f yaml
-opencli xueqiu hot-stock -f yaml
+opencli xueqiu stock NVDA -f yaml              # 实时行情
+opencli xueqiu hot -f yaml ; opencli xueqiu hot-stock -f yaml
+opencli xueqiu comments SH600519 -f yaml       # 个股讨论
+opencli xueqiu kline SH600519 -f yaml          # 历史K线
 ```
 
 OpenCLI 只复用用户已经存在且明确控制的浏览器会话。不要自动执行
