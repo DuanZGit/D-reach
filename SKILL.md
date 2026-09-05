@@ -51,7 +51,8 @@ metadata:
 
 > **网络全线 000 时先查 DNS，别怀疑出口**：`/etc/resolv.conf` 里 `172.19.0.2` 是透明代理的
 > fake-ip 解析器，代理一死就返回 `198.18.x` 让所有 HTTPS 变 000（域名看着解析成功，实则废）。
-> 改成 `nameserver 8.8.8.8` / `1.1.1.1` 立刻全通，不需要任何隧道或中继。
+> 改成 `nameserver 223.5.5.5` / `8.8.8.8` 立刻全通，不需要任何隧道、中继或 hosts 钉 IP
+> （duanz.xin 是 DDNS，IP 每天变，钉了隔天就砖）。
 
 - ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
 - ⚠️ `xhs`：cookie 过期，报 `not_authenticated` → 要用户 `xhs login` 扫码后才能用。
@@ -134,7 +135,7 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 |------|-----------|
 | [references/search.md](references/search.md) | 搜索通道完整参数与配额细节 |
 | [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS |
-| [references/social.md](references/social.md) | 小红书/抖音/微博/Twitter/V2EX/Reddit 细节 |
+| [references/social.md](references/social.md) | 微博 / V2EX / Reddit 细节（小红书、Twitter 各有归属，见文内指针） |
 | [references/dev.md](references/dev.md) | gh CLI / DeepWiki 完整用法 |
 | [references/video.md](references/video.md) | YouTube / B站 / 播客字幕 |
 | [references/finance.md](references/finance.md) | 雪球股票行情 |
