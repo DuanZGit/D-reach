@@ -47,7 +47,11 @@ metadata:
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
 | 需要登录的站点 | browser_use ⏱ | — | — |
 
-### 通道现状（2026-09-05 实测，沙箱出口只到 ug）
+### 通道现状（2026-09-05 实测）
+
+> **网络全线 000 时先查 DNS，别怀疑出口**：`/etc/resolv.conf` 里 `172.19.0.2` 是透明代理的
+> fake-ip 解析器，代理一死就返回 `198.18.x` 让所有 HTTPS 变 000（域名看着解析成功，实则废）。
+> 改成 `nameserver 8.8.8.8` / `1.1.1.1` 立刻全通，不需要任何隧道或中继。
 
 - ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
 - ⚠️ `xhs`：cookie 过期，报 `not_authenticated` → 要用户 `xhs login` 扫码后才能用。
