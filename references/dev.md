@@ -1,5 +1,33 @@
 # 开发工具
 
+> GitHub 不稳 / 需要中文排障时的替代通道见下方「国内开发通道」；完整实测清单在 [`cn-reach.md`](cn-reach.md)。
+
+## 国内开发通道（✅免 Key，不记账）
+
+```bash
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+
+# StackExchange 官方 API —— 报错/排障第一源（比搜索引擎更快命中已采纳答案）
+#   坑：q 只在 /search/advanced 生效；/search 只吃 intitle，用 q 会 400
+curl -s --compressed "https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=alpine+proot&site=stackoverflow&pagesize=5"
+# 取答案：/2.3/questions/<ids>/answers?filter=withbody&site=stackoverflow
+
+# 掘金（中文技术，POST）
+curl -s -H "Content-Type: application/json" -X POST "https://api.juejin.cn/search_api/v1/search" \
+  -d '{"key_word":"关键字","id_type":0,"cursor":"0","limit":5,"search_type":0}'
+
+# 博客园 / SegmentFault / OSCHINA —— 中文踩坑长尾（站内搜索页 + 浏览器 UA）
+curl -s -A "$UA" "https://zzk.cnblogs.com/s?w=关键字"
+curl -s -A "$UA" "https://segmentfault.com/search?q=关键字"
+curl -s -A "$UA" "https://www.oschina.net/search?q=关键字"
+
+# Hacker News —— 深度讨论
+curl -s "https://hn.algolia.com/api/v1/search?query=关键字&hitsPerPage=5"
+```
+
+- **Gitee**（国内代码托管，✅可达）：GitHub push 失败/不可达时的镜像与备选。
+- ⚠️ `search.douban.com`、`zhihu.com`（403）、`tieba.baidu.com`（403）需 browser_use 交互。
+
 ## GitHub (gh CLI)
 
 本机 `/usr/bin/gh`，免费无限，不记账。常用不啰嗦，只记容易踩的：
