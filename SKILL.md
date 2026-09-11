@@ -30,22 +30,39 @@ metadata:
 
 ## 路由表
 
+> **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
+> 完整国内通道实测清单（含不可达站点与替代链）见 **[references/cn-reach.md](references/cn-reach.md)**。
+
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆（自带计数器） | BrightData ⏱ | Jina ⏱ |
-| 英文/技术搜索 | Exa ⏱ | 百度千帆 | BrightData ⏱ |
-| 编程文档/issue | Firecrawl Developer Index（免 key） | Exa ⏱ | gh CLI |
-| 学术论文 | Firecrawl Research Index（需 key，免费） | Exa ⏱ | — |
+| 中文搜索 | 百度千帆（自带计数器） | cn.bing 站内 ⏱ | BrightData ⏱ |
+| 英文/技术搜索 | **cn.bing** ✅免 | Exa ⏱ | BrightData ⏱ |
+| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
+| 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |
+| 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
+| 学术论文 | **OpenAlex / Crossref** ✅免 | Firecrawl Research Index ✅免 | Semantic Scholar ✅免 |
+| 公司/专有名词背景 | 百度百科（千帆） | **cn.bing 站内** ✅免 | BrightData ⏱ |
+| 深度技术讨论 | **HN Algolia** ✅免 | V2EX ✅免 | cn.bing |
+| A股公告/披露 | **巨潮资讯 cninfo** ✅免 | gushen（雪球） | 东方财富 |
+| 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
+| 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 ✅免 | 百度千帆 | — |
+| 书影音评分 | 豆瓣 `window.__DATA__` ✅免 | 百度千帆 | — |
 | 网页抓取（反爬） | BrightData ⏱ | Jina ⏱ | browser_use ⏱ |
 | 批量网页抓取 | BrightData（循环单抓，≤10）⏱ | Jina ⏱ | — |
-| GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Exa |
+| GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Gitee ✅免 |
 | 仓库语义问答 | DeepWiki MCP `ask_question` | gh CLI 读源码 | — |
 | B站 | bili CLI ⏱ | browser_use ⏱（**不要 yt-dlp，会被 412 拦**） | — |
 | YouTube 字幕 | browser_use（yt-dlp 本机未跑通，见 video.md） | 隧道+cookies 的 yt-dlp | — |
 | 小红书 | xhs CLI ⏱ | browser_use ⏱ | — |
+| 微信公众号 | **weixin.sogou.com** ✅免 | Exa 限域 + BrightData ⏱ | — |
+| 微博 / 知乎 | browser_use ⏱（web 与 api 均 403 拦爬） | 千帆搜快照 | — |
 | Twitter/X | browser_use ⏱（本机 `twitter` 是 npm 同名假货，见下） | 装 Python 版 twitter-cli | — |
-| 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
 | 需要登录的站点 | browser_use ⏱ | — | — |
+
+### 🔴 本环境不可达（DNS 通 ≠ 能连，别硬试）
+
+`arxiv.org` / `zh.wikipedia.org` / `html.duckduckgo.com` / `scholar.google.com` / `chinaxiv.org` — 全部 000。
+替代链见 [cn-reach.md](references/cn-reach.md)。
 
 ### 通道现状（2026-09-05 实测）
 
@@ -149,11 +166,12 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 
 | 文档 | 什么时候读 |
 |------|-----------|
+| [references/cn-reach.md](references/cn-reach.md) | **国内网络环境实测通道总表**（可达/不可达 + 替代链 + 细分路由）——选路前先看它 |
 | [references/search.md](references/search.md) | 搜索通道完整参数与配额细节 |
 | [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS |
-| [references/social.md](references/social.md) | 微博 / V2EX / Reddit 细节（小红书、Twitter 各有归属，见文内指针） |
-| [references/dev.md](references/dev.md) | gh CLI / DeepWiki 完整用法 |
+| [references/social.md](references/social.md) | 微博 / V2EX / Reddit / 公众号 / 豆瓣 / 知乎 |
+| [references/dev.md](references/dev.md) | gh CLI / DeepWiki / StackExchange / 掘金 完整用法 |
 | [references/video.md](references/video.md) | YouTube / B站 / 播客字幕 |
-| [references/finance.md](references/finance.md) | 雪球股票行情 |
+| [references/finance.md](references/finance.md) | 雪球 / 巨潮资讯 / A股公告 |
 | [extensions/d-reach-xhs/SKILL.md](extensions/d-reach-xhs/SKILL.md) | 处理小红书笔记链接时 |
 | [extensions/d-reach-twitter/SKILL.md](extensions/d-reach-twitter/SKILL.md) | 处理 Twitter/X 内容时 |

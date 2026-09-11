@@ -36,6 +36,42 @@ OpenCLI 只复用用户已经存在且明确控制的浏览器会话。不要自
 
 ## 本环境推荐路径
 
+### ✅ 免 Key 免费财经通道（不记账）
+
+```bash
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+
+# 巨潮资讯 cninfo —— A 股【法定披露】权威公告源（比任何二手转述都硬）
+#   返回 announcements[]：secCode/secName/announcementTitle/announcementTime/adjunctUrl
+#   原文 PDF = http://static.cninfo.com.cn/ + adjunctUrl
+curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
+  -H "User-Agent: $UA" -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "pageNum=1&pageSize=20&column=szse&tabName=fulltext&searchkey=回购&seDate="
+#   column: szse=深/沪(含全市场全文检索)；另可用 sse / third / bj
+#   searchkey 支持公司名或公告标题词；需要精确到公司用 stock=<code>,<orgId>
+
+# 雪球热帖（⚠️ 需登录 cookie xq_a_token，无 token 会被 WAF 拦）
+#   listV3.json 已 404 废弃；listV2.json 返回 200 但内容是 WAF renderData 页（不是帖子数据）
+curl -s "https://xueqiu.com/query/v1/statuses/hot/listV2.json" \
+  -H "User-Agent: $UA" -H "Referer: https://xueqiu.com/" -H "Cookie: xq_a_token=$XQ_TOKEN"
+#   无 token 时降级：BrightData 抓 https://xueqiu.com/ 页面，或直接走 gushen 的行情（不需要 cookie）
+
+# 东方财富 / 同花顺 —— ✅ 可达（页面级，行情与研报摘要）
+```
+
+| 需求 | 首选 | 说明 |
+|------|------|------|
+| A股公告/回购/减持/年报 | **巨潮 cninfo** ✅免 | 法定披露原文 PDF，可引用 |
+| 行情（A股/美股） | gushen（`cn_market.py`） | 已封装，不需 cookie |
+| 社区观点/情绪 | 雪球（⚠️ 需 xq_a_token） | 非事实源，只作情绪参考 |
+| 实时快讯 | 财联社页面（⚠️ 旧 nodeapi 已失效） | 需现场探接口 |
+
+> ⚠️ **实测（2026-09-11）**：雪球 `query/v1/statuses/hot/listV3.json` → **404 已废弃**；
+> `statuses/hot/listV2.json` → 200 但返回 WAF 页；`stock.xueqiu.com/v5/stock/hot_stock` → 400 要登录。
+> 结论：**雪球免 Key 通道已废**，要么给 `xq_a_token`，要么走 BrightData 抓页面。
+
+### 行情与页面抓取
+
 ```bash
 # 1) A股/美股实时行情（gushen）
 <gushen_path>/tools/cn_market.py a 600519          # A股（gushen 需自行安装）
@@ -45,9 +81,4 @@ OpenCLI 只复用用户已经存在且明确控制的浏览器会话。不要自
 curl -s -X POST https://api.brightdata.com/request -H "Authorization: Bearer $BRIGHTDATA_APITOKEN" \
   -H "Content-Type: application/json" \
   -d '{"zone":"mcp_unlocker","format":"raw","data_format":"markdown","url":"https://xueqiu.com/S/SH600519"}'
-
-# 3) 雪球热帖（公开 JSON API）
-curl -s "https://xueqiu.com/query/v1/statuses/hot/listV3.json" \
-  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" \
-  -H "Referer: https://xueqiu.com/" 2>/dev/null | head -c 2000
 ```
