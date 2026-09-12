@@ -28,22 +28,6 @@ metadata:
 3. 首选失败（超时/风控/未安装）→ 同样换备选
 4. 全部越线 → 明确告知用户哪些额度用完，**不静默失败，不偷偷调付费 API**
 
-## 新设备密钥配置（首次使用、发现 `$EXA_API_KEY` 等缺失时）
-
-本技能全部密钥聚合在仓库根目录 `secrets.enc`（AES-256-CBC + PBKDF2 600k，内容清单与加解密命令见 `SECRETS.md`）。**口令必须由用户本人输入**——不自动生成、不联网获取、不进任何记忆系统。
-
-1. 检测缺失（如 `[ -z "$EXA_API_KEY" ]`）→ 向用户说明并索取口令一次。
-2. 解密落盘（本机执行）：
-   ```bash
-   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-     -in secrets.enc -out /tmp/.dreach.json -pass "pass:<用户输入>"
-   # 将各 key 逐条写入 ~/.config/dreach/env（文件权限 600）
-   # shell rc 里只加守卫式加载：[ -f ~/.config/dreach/env ] && . ~/.config/dreach/env
-   rm /tmp/.dreach.json   # 明文用完立即删除
-   ```
-3. **红线**：口令与 key 明文永不写入记忆（OpenViking / GLOBAL.md / daily log）、永不 commit、永不 echo 到日志。引用一律用 `$VAR`。
-4. 用户不愿给口令 → 不阻塞：降级到免费通道（gh CLI、DeepWiki、百度网页版）继续干活。
-
 ## 路由表
 
 > **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
