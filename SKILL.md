@@ -2,7 +2,7 @@
 name: d-reach
 description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
-  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、BrightData、Firecrawl、
+  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、BrightData、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
   想读一篇文章或链接（读一下/打开这个/看看链接）、想查社交平台内容（小红书/B站/微博/推特/Reddit）、
@@ -92,6 +92,7 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | Serper | `SERPER_API_KEY` | serper.dev |
 | 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
 | ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
+| LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
 
 ## 路由表
 
@@ -102,7 +103,8 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
 | 中文搜索 | 百度千帆（自带计数器） | cn.bing 站内 ⏱ | BrightData ⏱ |
-| 英文/技术搜索 | **cn.bing** ✅免 | Exa ⏱ | BrightData ⏱ |
+| 英文/技术搜索 | **cn.bing** ✅免 | LangSearch ⏱ / Exa ⏱ | BrightData ⏱ |
+| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
 | 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
@@ -172,6 +174,14 @@ python3 $SKILLS/baiduaisearchwithquota/scripts/smart_search.py search '查询'
 curl -s --max-time 30 -X POST https://api.exa.ai/search \
   -H "x-api-key: $EXA_API_KEY" -H "Content-Type: application/json" \
   -d '{"query":"查询","numResults":5}'
+
+# LangSearch（Web Search，全功能免费；唯 daily token 额度 00:00 UTC 重置、多 key 共享；count 1-50）
+KEY=$(sh $SKILLS/d-reach/scripts/load_key.sh LANGSEARCH_API_KEY https://langsearch.com/dashboard || 降级)
+curl -s --max-time 30 -X POST https://api.langsearch.com/v1/web-search \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"query":"查询","count":10,"freshness":"oneWeek"}'
+# 结果 data.webPages.value[]（name/url/snippet/summary/datePublished 可能缺；contents.text 开启换全文）
+# 每次看响应 usage.input/output_tokens——全文模式最烧日额度，深挖默认用 snippet
 
 # BrightData Web Unlocker（5000 次/月）——抓取
 curl -s --max-time 120 -X POST https://api.brightdata.com/request \
