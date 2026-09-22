@@ -93,28 +93,6 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
 | ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
 
-## 凭据接口（key 从哪来，技能不管）
-
-本技能**不携带任何密钥**。需要 key 的通道统一经 `scripts/load_key.sh` 取用，查找链：
-
-```
-$环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录>/.env → 缺失报错+引导
-```
-
-- 用法：`KEY=$(sh scripts/load_key.sh EXA_API_KEY https://dashboard.exa.ai) || 降级`
-- 缺失时 stderr 输出四要素（变量名/申请 URL/写入方法/降级说明），agent 转述给用户即可
-- 首次使用无 key 的用户（BYOK）：按报错申请填入 `~/.config/agents/env`（chmod 600）即可解锁付费通道；不填则全技能走免费通道，功能自动降级
-- 纪律：key 值永不进 SKILL.md/代码/commit/日志/记忆；引用一律 `$VAR`；禁止 `cat .env*`
-
-| 通道 | 变量名 | 申请入口（免费额度） |
-|---|---|---|
-| Exa | `EXA_API_KEY` | dashboard.exa.ai |
-| BrightData | `BRIGHTDATA_APITOKEN` | brightdata.com |
-| Firecrawl | `FIRECRAWL_API_KEY` | firecrawl.dev |
-| Serper | `SERPER_API_KEY` | serper.dev |
-| 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
-| ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
-
 ## 路由表
 
 > **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
