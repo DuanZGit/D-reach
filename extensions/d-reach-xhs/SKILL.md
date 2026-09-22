@@ -8,6 +8,10 @@ triggers:
 metadata:
   hermes:
     tags: [research, social-media, xiaohongshu, agent-reach]
+upstream:
+  repo: https://github.com/Panniantong/Agent-Reach
+  path: agent_reach/channels/xiaohongshu.py
+  pin: da5044d
 ---
 
 # Xiaohongshu Note Reading (via agent-reach)

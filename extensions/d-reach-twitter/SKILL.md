@@ -8,6 +8,10 @@ metadata:
   hermes:
     tags: [research, social-media, twitter, x, agent-reach, twitter-cli]
     related_skills: [xitter, wiki-management]
+upstream:
+  repo: https://github.com/Panniantong/Agent-Reach
+  path: agent_reach/channels/twitter.py
+  pin: da5044d
 ---
 
 # X/Twitter Reading via Python `twitter-cli` (v0.8.5)
