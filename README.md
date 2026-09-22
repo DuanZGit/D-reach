@@ -11,17 +11,23 @@ gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browse
 ## 用法
 
 ```bash
-# 看额度
+# 开工前规划：到裕度线还剩多少（推荐第一步）
+python3 scripts/quota.py budget
+
+# 看原始计数
 python3 scripts/quota.py status
 
-# 占用一次（超限 exit 1，于是可以 `use x || 换备选`）
+# 占用一次：exit 0=正常 / 2=已过裕度线（仍记账）/ 1=越免费线（不记账）
 python3 scripts/quota.py use brightdata
 
 # 清零
 python3 scripts/quota.py reset brightdata
 ```
 
-调用方式全部在 [`SKILL.md`](SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
+调用方式全部在 [`SKILL.md`](./SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
+
+**调研强度默认 L2**（≥4 个独立来源 + 2 轮），L1/L2/L3 的定档依据、广度要求与收尾自查见 SKILL.md。
+免费免 Key 通道不记账，**深挖时优先铺满它们**。
 
 ## 免费额度一览
 
@@ -35,6 +41,10 @@ python3 scripts/quota.py reset brightdata
 | 百度千帆搜索 | 400 / 日（**由 baiduaisearchwithquota 自己记账**） | BrightData → Exa |
 | Jina Reader | 300 / 日（限流） | BrightData |
 | gh / yt-dlp / DeepWiki / v2ex | 免费无限 | — |
+| cn.bing / StackExchange / HN / OpenAlex / Crossref / 掘金 / 豆瓣 / 36氪 | 免费无限 | — |
+
+**30% 裕度**：日线与月线都按上限的 70% 设线（`D_REACH_RESERVE` 可调），过线只提示不阻断；
+剩下 30% 留给突发任务。上文所有免 Key 不限量通道都不记账 —— 它们才是深挖的主力。
 
 ## 环境变量
 

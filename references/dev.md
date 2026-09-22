@@ -57,6 +57,9 @@ minis-mcp-cli call deepwiki ask_question --input '{"repoName":"owner/repo","ques
 - 参数名是 **`repoName`**（不是 `repo`），实测 2026-09-05；接受 `owner/repo` 字符串或最多 10 个的数组。
 - 另有 `read_wiki_structure`（目录树）、`read_wiki_contents`（全文）两个工具。
 - 未索引的仓库直接回 `Repository not found`（私有仓库默认没索引）→ 立刻降级 `gh`，不要重试。
+  但 **`fetch failed` / `not available (last failed Ns ago)` 是另一回事**：pi 的 MCP 客户端有 ~15s 失败退避缓存，
+  `connect` 报这类错常常是上一轮的瞬时抖动被缓存住了（2026-09-22 实测：DeepWiki 被判死 → 等待后重连即通，
+  端点 `mcp.deepwiki.com/mcp` 全程 200），**隔一会儿重试即可，别当场判通道死了**。
 - **不要传 `https://github.com/...` 全 URL**（会被拒）。
 - 返回的是已索引的文档摘要（顶部有 `Last indexed:` 日期），不是实时文件列表；
   要精确文件内容 / 最新 commit → `gh api`。

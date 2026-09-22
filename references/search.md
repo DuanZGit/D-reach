@@ -1,6 +1,74 @@
+> **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
+> `SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills`
+> （UG/本机命中 `~/.agents/skills`，Minis 命中 `/var/minis/skills`。）
+
 # 搜索工具
 
 > **主路由表在 `SKILL.md`，国内环境通道实测清单在 [`cn-reach.md`](cn-reach.md)。本文只补参数细节，不重复路由。**
+
+## 调研强度与调用序列
+
+定档表在 `SKILL.md`。这里只给「一次到底发几条」的样板。
+
+**L1 点查**（2 来源 / 1 轮）—— 例：查某库版本发布日期
+
+```bash
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+# 免费两路互证（不记账）
+curl -s -A "$UA" "https://cn.bing.com/search?q=Rust+1.90+release+date"
+curl -s "https://hn.algolia.com/api/v1/search?query=Rust+1.90&hitsPerPage=5"
+# 一手源优先：直接读官方公告原文（Jina，记账）
+curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
+```
+
+**L2 对比·选型**（4 来源 / 2 轮 / 免费≥3 条）—— 默认档
+
+| 轮 | 做什么 | 典型通道 |
+|---|---|---|
+| 轮 1 发现 | 中英文各一路 + 真实使用体验 + 中文长尾 | cn.bing（英文）、千帆（中文）、StackExchange / HN、掘金 / 博客园 |
+| 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补一轮反向体验 | 官方文档（Jina 读原文）、`<候选> vs`、`<候选> 问题` |
+
+只有 Exa / BrightData / Jina 才 `quota.py use`；上文其余通道免费。
+
+**L3 深调研**（6 来源 / 3 轮 / 必含反证）
+
+| 轮 | 做什么 | 典型通道 |
+|---|---|---|
+| 1 广撒 | 中英文 + 学术 + 行业 + 代码仓 各一路 | cn.bing、千帆、OpenAlex/Crossref、36氪/InfoQ、gh CLI / DeepWiki |
+| 2 追深 | 把首轮捞到的人名/机构/版本/术语回灌成新查询 | 同轮 1，换成更具体的限定词 |
+| 3 反证 | `<主题> 缺点/失败/不推荐/争议/vs 替代` | cn.bing、HN、V2EX、知乎（千帆快照）|
+
+交不了差就老实写「未发现反例 + 试过哪些通道」，**不编造**。
+
+## 广度：查询改写矩阵（至少 3 种）
+
+| 改写方向 | 例（问：「DeepSeek Harness 靠谱吗」） |
+|---|---|
+| 原词 | `DeepSeek Harness` |
+| 同义 / 上下位 | `DeepSeek 自动化测试工具` / `LLM 测试框架 对比` |
+| 英文（英文源信息密度高） | `DeepSeek Harness review` / `agent harness benchmark` |
+| 限定域（找一手源） | `site:github.com` / `site:docs.xxx.com` / 学术走 OpenAlex |
+| 时效（时效类问题必加） | `after:2026-06-01` / 中文加「2026」/ BrightData 加 `&tbs=qdr:m` |
+
+**反证独立走一轮**（L3 必做）：`<主题> 缺点` / `失败` / `不推荐` / `争议` / `vs 替代品`。
+
+## 免费通道铺开清单（不限量，深挖主力）
+
+| 场景 | 通道 | 命中数（L2 建议） |
+|---|---|---|
+| 英文/技术 | cn.bing | 2-4 |
+| 报错/排障 | StackExchange `search/advanced?q=` | 1-2 |
+| 深度讨论 | HN Algolia | 1-2 |
+| 学术 | OpenAlex → Crossref | 1-2 各 |
+| 中文技术长尾 | 掘金 API / 博客园 zzk / SegmentFault | 1-2 |
+| 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 | 1-2 |
+| 书影音评分 | 豆瓣 `window.__DATA__` | 1 |
+| 代码/仓库 | gh CLI search / DeepWiki `ask_question` | 1-3 |
+| A 股公告 | 巨潮 cninfo | 1-2 |
+| 微信公众号 | weixin.sogou.com | 1 |
+
+> 这些通道 **不要 `quota.py use`**（不记账、不限量）。限额通道只用在它们拿不到的地方：
+> 强反爬页、需登录站、中文搜索溢出（千帆 >400/日 时）。
 
 ## 搜索路由（速查，完整见 SKILL.md）
 
@@ -149,7 +217,7 @@ curl -s -X POST https://api.exa.ai/search -H "x-api-key: $EXA_API_KEY" \
 `baiduaisearchwithquota` 自己维护（计数器在 `~/.baidu_search_quota.json`）。
 
 ```bash
-S=/var/minis/skills/baiduaisearchwithquota/scripts
+S=$SKILLS/baiduaisearchwithquota/scripts
 python3 $S/smart_search.py search '搜索内容'          # 搜索（最常用）
 python3 $S/quota_manager.py dispatch search '内容'    # 按场景调度（自动跳过用完/≤20% 的 API）
 python3 $S/quota_manager.py status                    # 27 个工具剩余额度
