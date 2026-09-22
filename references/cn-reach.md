@@ -42,6 +42,8 @@ curl -s -A "$UA" "https://www.so.com/s?q=关键词"
 ```
 
 **结论**：搜英文技术用 **cn.bing.com**；搜中文用 **百度千帆**（400/日）；两者都不够再上 BrightData 打 Google。
+时效/限域另有 **LangSearch**（`api.langsearch.com` 本机实测 200/1.5s，2026-09-22）——全功能免费（仅 daily token 额度），
+`freshness` + `include/excludeDomains` 是强项，英文与站内限定检索优先它；中文相关性一般，仍回千帆。
 
 ## 🟢 编程 / 排障（全部免 Key，不记账）
 

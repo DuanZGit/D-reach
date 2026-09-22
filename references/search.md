@@ -75,7 +75,8 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 | 场景 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
 | 中文搜索 | 百度千帆（`smart_search.py dispatch search`） | cn.bing 站内 | BrightData REST |
-| 英文/技术搜索 | **cn.bing** ✅免 | Exa REST | BrightData REST（Google） |
+| 英文/技术搜索 | **cn.bing** ✅免 | LangSearch REST ⏱ / Exa REST | BrightData REST（Google） |
+| 时效/限域检索 | LangSearch REST ⏱（freshness + include/excludeDomains） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
 | 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |
 | 编程问题/README/Issue/PR | Firecrawl Developer Index ✅免 | Exa | GitHub |
@@ -208,6 +209,43 @@ curl -s -X POST https://api.exa.ai/search -H "x-api-key: $EXA_API_KEY" \
 - 语义理解强，适合技术/英文查询
 - 返回结果包含 title、url、snippet
 - 免费额度可用，注意控制调用量
+
+## LangSearch（Web Search，⭐ 全功能免费）
+
+**限制按 token 计、不按次**（官方无 RPM/RPD——配额里的 50 次/日是本技能自设保守线）。三线实际值**只在 Dashboard 显示**：
+
+| 线 | 含义 | 官方公布值 |
+|---|---|---|
+| RPS | 每秒请求数 | 新号 **5** |
+| TPM | 滚动 60s 窗口内 input+output tokens | Dashboard |
+| TPD | 当前 UTC 日 input+output tokens | Dashboard（含日用量百分比） |
+
+单价 **$0/百万 token**；计法：input=查询词、output=正文/snippet，**标题/URL 等元数据不计**；响应 `usage.input/output_tokens`
+相加=本次消耗。**00:00 UTC 固定重置**（非本地午夜、非首请求后 24h），所有 key 共享、多 key 不恢复。
+429 跟 `Retry-After`；⚠️ **客户端超时 ≠ 服务端没跑成**（可能已结算 token）——抖动重试前先权衡双花。
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `query` | string | 必填非空 |
+| `count` | int 1-50（默认 10） | >50 返 400 |
+| `freshness` | `noLimit/oneDay/oneWeek/oneMonth/oneYear` 或 `YYYY-MM-DD[..YYYY-MM-DD]` | 时效检索 |
+| `includeDomains` / `excludeDomains` | string[] | 限域 / 排除 |
+| `contents.text` | bool 或 `{maxCharacters: 正整数}`（默认 5000） | 返回全文而非 snippet，**照常计入日额度** |
+
+**响应**：先看 HTTP 状态 → 成功取 `data.webPages.value[]`（`name/url/snippet` 或 `text`，`datePublished` 可能缺；body `code=200`）。
+**错误**：400=参数错不原样重试；401/403=凭据；429=先分清瞬时限流 vs 日额度用尽（看 `msg` + dashboard）；5xx=退避重试。
+**深挖默认别开 `contents.text`**：实测 snippet 5 结果 ≈ 1.2k（英）/ 2.3k（中）tok，而全文 10 结果 ×5000 字 ≈ 上万 tok/次——几次就可能烧穿 TPD；要全文时 `maxCharacters` 压到 1000-3000。
+
+```bash
+KEY=$(sh $SKILLS/d-reach/scripts/load_key.sh LANGSEARCH_API_KEY https://langsearch.com/dashboard || 降级)
+curl -s --max-time 30 -X POST https://api.langsearch.com/v1/web-search \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"query":"uv pip benchmark","count":10,"freshness":"oneWeek","includeDomains":["astral.sh"]}'
+```
+
+> 也有 MCP 端点 `https://mcp.langsearch.com/mcp`（Bearer）。本机实测 2026-09-22：EN/CN 均 200（1.5s/1.9s），
+> **CN 相关性一般**（中文查询返了英文结果）→ 中文仍优先千帆，LangSearch 定位英文+时效/限域。
+
 
 ---
 

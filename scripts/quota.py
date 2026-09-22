@@ -35,6 +35,7 @@ LIMITS = {
     "brightdata":  (5000, None),   # 免费 5000/月
     "exa":         (1000, 50),     # 新账号约 1000/月，日线防单日打爆
     "firecrawl":   (1000, 200),    # Free plan 1000 credits/月
+    "langsearch":  (None, 50),     # 官方无请求日配额（RPS5/TPM/TPD 全 token 计，值见 Dashboard）；50=本技能自设保守线
     "jina_reader": (None, 300),    # 免费但限流
     "browser_use": (None, 100),    # Minis 内置
     "xhs":         (None, 200),    # 登录态免费，防风控

@@ -2,7 +2,7 @@
 
 搜索 / 爬取 / 网页读取 / 社交媒体 / 代码仓库 / 视频字幕的统一路由（Agent Skill）。
 
-**通道**：百度千帆、Exa、BrightData、Firecrawl（Developer / Research Index）、Jina Reader、
+**通道**：百度千帆、Exa、LangSearch、BrightData、Firecrawl（Developer / Research Index）、Jina Reader、
 gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browser_use。
 
 **设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
@@ -35,6 +35,7 @@ python3 scripts/quota.py reset brightdata
 | --- | --- | --- |
 | BrightData Unlocker | 5,000 / 月 | Jina → browser_use |
 | Exa | ~1,000 / 月 | 百度千帆 → BrightData |
+| LangSearch Web Search | 免费 daily token（00:00 UTC 重置，5 RPS 起，dashboard 看用量） | cn.bing → BrightData |
 | Firecrawl Free | 1,000 credits / 月 | BrightData → Jina |
 | Firecrawl Research Index | 免费（不耗 credits，需 key） | — |
 | Firecrawl Developer Index | 免 API key | — |
@@ -53,6 +54,7 @@ python3 scripts/quota.py reset brightdata
 | `BRIGHTDATA_APITOKEN` | BrightData REST（5,000 次/月） |
 | `EXA_API_KEY` | Exa 搜索 |
 | `FIRECRAWL_API_KEY` | Firecrawl Research Index / 提高 Developer Index 限流 |
+| `LANGSEARCH_API_KEY` | LangSearch Web Search（langsearch.com/dashboard） |
 | `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` | twitter-cli 登录态 |
 
 ## 安全
