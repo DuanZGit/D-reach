@@ -230,7 +230,7 @@ curl -s -X POST https://api.exa.ai/search -H "x-api-key: $EXA_API_KEY" \
 | `count` | int 1-50（默认 10） | >50 返 400 |
 | `freshness` | `noLimit/oneDay/oneWeek/oneMonth/oneYear` 或 `YYYY-MM-DD[..YYYY-MM-DD]` | 时效检索 |
 | `includeDomains` / `excludeDomains` | string[] | 限域 / 排除 |
-| `contents.text` | bool 或 `{maxCharacters: 正整数}`（默认 5000） | 返回全文而非 snippet，**照常计入日额度** |
+| `contents.text` | bool 或 `{maxCharacters: 正整数}`（默认 5000；旧名 `max_characters` 也兼容，同时给时 maxCharacters 优先） | 返回全文而非 snippet，**照常计入日额度** |
 
 **响应**：先看 HTTP 状态 → 成功取 `data.webPages.value[]`（`name/url/snippet` 或 `text`，`datePublished` 可能缺；body `code=200`）。
 **错误**：400=参数错不原样重试；401/403=凭据；429=先分清瞬时限流 vs 日额度用尽（看 `msg` + dashboard）；5xx=退避重试。
@@ -243,8 +243,11 @@ curl -s --max-time 30 -X POST https://api.langsearch.com/v1/web-search \
   -d '{"query":"uv pip benchmark","count":10,"freshness":"oneWeek","includeDomains":["astral.sh"]}'
 ```
 
-> 也有 MCP 端点 `https://mcp.langsearch.com/mcp`（Bearer）。本机实测 2026-09-22：EN/CN 均 200（1.5s/1.9s），
+> 也有 MCP 端点 `https://mcp.langsearch.com/mcp`（Bearer）——**MCP 连接不额外给额度**，与 API key 同池共享。
+> 本机实测 2026-09-22：EN/CN 均 200（1.5s/1.9s），
 > **CN 相关性一般**（中文查询返了英文结果）→ 中文仍优先千帆，LangSearch 定位英文+时效/限域。
+> ⚠️ **TPM/TPD 绝对数值与今日消耗官方从不公布**：官方 12 页文档（`llms.txt` 全清单）已逐页查过，
+> 唯一出处是登录后 Dashboard —— **别再花轮次检索数值**，要看就打开 Dashboard 三个数：RPS 上限 / TPM 上限 / 今日已耗+百分比。
 
 
 ---
