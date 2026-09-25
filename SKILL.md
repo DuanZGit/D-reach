@@ -91,6 +91,8 @@ metadata:
 **广度**：同一问题至少 **5 种**改写 —— 原词 → 同义/上下位 → 英文 → 限定域（`site:` /
 LangSearch `includeDomains`）→ 时效加日期 → 再加一条**反方问法**（`缺点 / 不推荐 / 坑 / 争议`）。
 嫌手写慢就让千帆「智能Query改写」(10/日) 批量生成变体。
+**语义通道的 query 控制在 4–6 个词**（c2 实测：9 个词把 LangSearch 稀释成维基泛条目，换 4 词后
+Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 cn.bing `site:` 和 Firecrawl Developer 过滤。
 反证独立走一轮（`<主题> 缺点 / 失败 / 不推荐 / 争议`）。模板与分档调用序列见
 [references/search.md](references/search.md)。
 
