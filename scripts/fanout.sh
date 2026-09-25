@@ -53,6 +53,10 @@ case ",$ON," in
   *,langsearch,*|*,exa,*|*,fcres,*|*,bd,*) DEEP=1 ;;
 esac
 
+# CJK 检测：Crossref / OpenAlex 对中文 query 相关性差（c2 实测：中文 query 返回「水质监测站 /
+# 变电站 / 暖通」这类匹配到"配置/安装"字样的噪声）→ 中文 query 时自动跳过 Crossref
+CJK=$(python3 -c 'import sys,re;print("1" if re.search(r"[\u4e00-\u9fff\u3400-\u4dbf]",sys.argv[1]) else "0")' "$Q" 2>/dev/null || echo 0)
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 CH="$TMP/chans"; mkdir -p "$CH"
@@ -107,7 +111,11 @@ f_oalex() {  # OpenAlex 学术
     --data-urlencode "search=$Q" --data-urlencode "per-page=5" \
     --data-urlencode 'mailto=d-reach@local' -o "$TMP/oalex.json" 2>/dev/null
 }
-f_crossref() {
+f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时跳过）
+  if [ "$CJK" = "1" ]; then
+    echo "cjk" > "$TMP/skip.crossref"
+    return 0
+  fi
   curl -s --max-time 12 -G "https://api.crossref.org/works" \
     --data-urlencode "query=$Q" --data-urlencode "rows=5" \
     --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" 2>/dev/null
@@ -151,7 +159,9 @@ f_fcres() {
 f_bd() {
   gate brightdata || return 0
   # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
-  curl -s --max-time 50 -X POST "https://api.brightdata.com/request" \
+  # ⚠️ 超时压到 25s：c2 实测 5 次调用 1×400(漏format)/1×500/2×50s 超时，而它是 deep 里最不
+  #    稳定的一路，一次超时就把整轮从 ~12s 拖到 50s+。要么快回，要么让位。
+  curl -s --max-time 25 -X POST "https://api.brightdata.com/request" \
     -H "Authorization: Bearer $BD_KEY" -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys,urllib.parse;print(json.dumps({"zone":"mcp_unlocker","format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
     -o "$TMP/bd.json" -w '%{http_code}' > "$TMP/bd.http" 2>/dev/null
@@ -454,6 +464,11 @@ for key, name, note, fn, deep_only in SECTIONS:
         continue
     if skip == "quota":
         print(f"### 🔇 {name} —— 已越免费线，本轮自动跳过\n")
+        dead.append(name)
+        continue
+    if skip == "cjk":
+        print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
+              f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
         dead.append(name)
         continue
     try:

@@ -68,6 +68,13 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 
 懒得多想就让**千帆「智能Query改写」(10/日)** 把一个问题批量翻成多种问法，再挑几条去打。
 
+**语义通道的 query 要短（c2 实测教训）**：LangSearch / Exa 吃的是语义相似度，query 一长就被稀释 ——
+c2 第一轮用了 9 个词，LangSearch 返回维基泛条目 + Google CAPTCHA 页，Crossref 跑去匹配"配置"字样
+返回「水质监测站 / 变电站」；第二轮换成 4 个词（`mihomo wireguard 出站 配置 persistent-keepalive`），
+Exa 立刻命中 mihomo 官方 wiki 和三个真实 issue。
+**做法**：给 LangSearch/Exa 的 query 压在 **4–6 个词**，长尾限定词交给 cn.bing 站内（`site:`）和
+Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Crossref 已被 fanout 自动跳过。
+
 **反证独立走一轮**（L3 必做）：`<主题> 缺点` / `失败` / `不推荐` / `争议` / `vs 替代品`，
 且**不并入**前两轮的来源计数。
 
