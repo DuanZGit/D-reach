@@ -1,0 +1,496 @@
+#!/usr/bin/env bash
+# fanout.sh —— d-reach 并行铺开器（「全加全扩」落地件）
+#
+# 一条命令并发 9 路免费免 Key 通道；--deep 追加 LangSearch / Exa /
+# Firecrawl-Research / BrightData-Google / V2EX。
+# 轮 1 发现一律走它，别一条一条串行试：
+#   实测 3 路串行 2.95s vs 并行 1.30s —— 铺开耗时 ≈ 最慢一路，与路数基本无关。
+#
+# 用法:
+#   fanout.sh "<query>"              # 默认档：9 路免费通道（含中文/英文/学术/排障/长尾）
+#   fanout.sh "<query>" --deep       # 深调研：追加 5 路付费/限 token 通道
+#   fanout.sh "<query>" --n 8        # 每路最多列几条（默认 5）
+#   fanout.sh "<query>" --on bing,hn,oalex   # 只跑指定通道（见下方 CHANNELS）
+#   fanout.sh --list                 # 列出通道名
+#
+# 记账: 免费免 Key 通道不记账；deep 下 LangSearch/Exa/BrightData 调用前自动
+#       `quota.py use`，退出码 1（越免费线）→ 自动跳过该路并在输出里标注，
+#       不拖死其他路。百度千帆由它自己的计数器记账，这里不双扣。
+#
+# 通道命名（--on 用）:
+#   bing se hn jj oalex crossref segfault fcdev qianfan | deep: langsearch exa fcres bd
+#
+# 已退役通道（别往回加）：
+#   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
+#   · V2EX search —— /search?q= 302→/go/search，返回节点帖子列表、与 query 无关（假结果）
+#   中文社区长尾现在靠 掘金 + SegmentFault + cn.bing 站内。
+
+set -u
+
+DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+QUOTA="$DIR/quota.py"
+SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills
+BAIDU="$SKILLS/baiduaisearchwithquota/scripts"
+UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+
+# ---------- 参数 ----------
+Q=""; DEEP=0; N=5; ON=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deep) DEEP=1 ;;
+    --n) shift; N="${1:-5}" ;;
+    --on) shift; ON="${1:-}" ;;
+    --list) sed -n 's/^#   \(.*\)$/\1/p' "$0" | tail -2; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) [ -z "$Q" ] && Q="$1" ;;
+  esac
+  shift
+done
+if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans]"; exit 2; fi
+
+# --on 里点名了 deep 专属通道 → 自动按 deep 跑（省得再写一遍 --deep）
+case ",$ON," in
+  *,langsearch,*|*,exa,*|*,fcres,*|*,bd,*) DEEP=1 ;;
+esac
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+CH="$TMP/chans"; mkdir -p "$CH"
+
+# ---------- 记账闸门 ----------
+# 返回 0=可跑；1=越免费线(跳过)；key 缺失也返回 1 并写原因
+gate() {
+  svc="$1"
+  if [ "$svc" = "exa" ]; then
+    EXA_KEY=$(sh "$DIR/load_key.sh" EXA_API_KEY https://dashboard.exa.ai 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "langsearch" ]; then
+    LS_KEY=$(sh "$DIR/load_key.sh" LANGSEARCH_API_KEY https://langsearch.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "firecrawl" ]; then
+    FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "brightdata" ]; then
+    BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  fi
+  if ! python3 "$QUOTA" use "$svc" >/dev/null 2>&1; then
+    echo "quota" > "$TMP/skip.$svc"; return 1
+  fi
+  return 0
+}
+want() { [ -z "$ON" ] && return 0; case ",$ON," in *",$1,"*) return 0;; esac; return 1; }
+
+# ---------- 免费免 Key 通道 ----------
+f_bing() {   # 英文/技术
+  curl -s --max-time 14 -A "$UA" -G "https://cn.bing.com/search" --data-urlencode "q=$Q" \
+    -H 'Accept-Language: en-US,en;q=0.9' -o "$TMP/bing.html" 2>/dev/null
+}
+f_se() {     # StackExchange 排障
+  # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
+  # shellcheck disable=SC2086
+  set -- $Q
+  SEQ="${1:-} ${2:-} ${3:-} ${4:-} ${5:-}"
+  curl -s --compressed --max-time 15 -G "https://api.stackexchange.com/2.3/search/advanced" \
+    --data-urlencode "order=desc" --data-urlencode "sort=relevance" \
+    --data-urlencode "q=$SEQ" --data-urlencode "site=stackoverflow" \
+    --data-urlencode "pagesize=5" -o "$TMP/se.json" 2>/dev/null
+}
+f_hn() {     # HN 深技术讨论
+  curl -s --max-time 12 -G "https://hn.algolia.com/api/v1/search" \
+    --data-urlencode "query=$Q" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" 2>/dev/null
+}
+f_jj() {     # 掘金 中文技术长尾
+  curl -s --max-time 12 -H 'Content-Type: application/json' -X POST \
+    "https://api.juejin.cn/search_api/v1/search" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"key_word":sys.argv[1],"id_type":0,"cursor":"0","limit":5,"search_type":0}))' "$Q")" \
+    -o "$TMP/jj.json" 2>/dev/null
+}
+f_oalex() {  # OpenAlex 学术
+  curl -s --max-time 12 -G "https://api.openalex.org/works" \
+    --data-urlencode "search=$Q" --data-urlencode "per-page=5" \
+    --data-urlencode 'mailto=d-reach@local' -o "$TMP/oalex.json" 2>/dev/null
+}
+f_crossref() {
+  curl -s --max-time 12 -G "https://api.crossref.org/works" \
+    --data-urlencode "query=$Q" --data-urlencode "rows=5" \
+    --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" 2>/dev/null
+}
+f_segfault() { # SegmentFault 中文技术长尾（-L 跟跳转；博客园已废弃）
+  curl -sL --compressed --max-time 14 -A "$UA" -G "https://segmentfault.com/search" \
+    --data-urlencode "q=$Q" -o "$TMP/segfault.html" 2>/dev/null
+}
+f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
+  curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" \
+    --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" 2>/dev/null
+}
+f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
+  [ -d "$BAIDU" ] || { echo "[fanout] 千帆技能目录缺失" > "$TMP/qianfan.txt"; return; }
+  timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" 2>&1 |
+    sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' > "$TMP/qianfan.txt"
+}
+
+# ---------- deep 追加通道 ----------
+f_langsearch() {
+  gate langsearch || return 0
+  curl -s --max-time 30 -X POST "https://api.langsearch.com/v1/web-search" \
+    -H "Authorization: Bearer $LS_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":20}))' "$Q")" \
+    -o "$TMP/langsearch.json" -w '%{http_code}' > "$TMP/langsearch.http" 2>/dev/null
+}
+f_exa() {
+  gate exa || return 0
+  curl -s --max-time 20 -X POST "https://api.exa.ai/search" \
+    -H "x-api-key: $EXA_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"numResults":10}))' "$Q")" \
+    -o "$TMP/exa.json" -w '%{http_code}' > "$TMP/exa.http" 2>/dev/null
+}
+f_fcres() {
+  gate firecrawl || return 0
+  curl -s --max-time 20 -H "Authorization: Bearer $FC_KEY" -G \
+    "https://api.firecrawl.dev/v2/search/research/papers" \
+    --data-urlencode "query=$Q" --data-urlencode "k=5" \
+    -o "$TMP/fcres.json" -w '%{http_code}' > "$TMP/fcres.http" 2>/dev/null
+}
+f_bd() {
+  gate brightdata || return 0
+  # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
+  curl -s --max-time 50 -X POST "https://api.brightdata.com/request" \
+    -H "Authorization: Bearer $BD_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys,urllib.parse;print(json.dumps({"zone":"mcp_unlocker","format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
+    -o "$TMP/bd.json" -w '%{http_code}' > "$TMP/bd.http" 2>/dev/null
+}
+# 已退役通道（2026-09-25 实测，别往回加）：
+#   · V2EX /search?q= —— 302 → /go/search，返回「搜索引擎技术研究」节点帖子，与 query 无关
+#     （会给假结果；假结果比无响应更毒，故整路移除）
+#   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
+#   中文社区长尾现在靠 掘金 + SegmentFault + cn.bing 站内；知乎 403、微博需登录 → 走千帆快照。
+
+# ---------- 并发发射 ----------
+launch() {   # $1 = 函数名；失败不拖垮整体
+  fn="$1"; want "${fn#f_}" || return 0
+  ( "$fn" ) & 
+}
+for fn in f_bing f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan; do launch "$fn"; done
+if [ "$DEEP" = 1 ]; then
+  for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
+fi
+wait
+
+# ---------- 渲染 ----------
+python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
+import json, os, re, sys, html, pathlib
+
+tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+N = max(1, min(N, 20))
+ONLY = {c for c in ON.split(",") if c} if ON else None   # None = 全跑
+
+def load_text(name):
+    p = os.path.join(tmp, name)
+    if not os.path.exists(p) or os.path.getsize(p) == 0:
+        return None
+    raw = pathlib.Path(p).read_bytes()
+    if not raw.strip():
+        return None
+    for enc in ("utf-8", "gb18030"):
+        try:
+            return raw.decode(enc)
+        except Exception:
+            pass
+    return raw.decode("utf-8", "replace")
+
+def load_json(name):
+    t = load_text(name)
+    if t is None:
+        return None
+    try:
+        return json.loads(t)
+    except Exception:
+        return None
+
+def clean(s):
+    out = str(s if s is not None else "")
+    out = re.sub(r"<[^>]+>", " ", out)
+    for _ in range(3):          # Crossref 有双重转义记录（&amp;amp;），解到底
+        new = html.unescape(out)
+        if new == out:
+            break
+        out = new
+    return re.sub(r"\s+", " ", out).strip()
+
+def trunc(s, n=110):
+    s = clean(s)
+    return s[:n] + ("…" if len(s) > n else "")
+
+def rowify(pairs):
+    """去重 + 截断；URL 必须是 http(s) 才算来源。"""
+    out, seen = [], set()
+    for t, u, x in pairs:
+        t, u, x = clean(t), str(u or "").strip(), clean(x)
+        if not t or not u.startswith("http") or u in seen:
+            continue
+        seen.add(u)
+        out.append((t[:170], u, x[:120]))
+        if len(out) >= N:
+            break
+    return out
+
+def walk_generic(d):
+    """兜底：递归抓 {title/name, url/link} 对（结构未知的通道用它）。"""
+    out = []
+    def walk(o):
+        if isinstance(o, dict):
+            u = o.get("url") or o.get("link") or o.get("html_url") or o.get("landing_page_url")
+            t = o.get("title") or o.get("name")
+            if isinstance(u, str) and u.startswith("http") and t:
+                out.append((t, u, trunc(o.get("snippet") or o.get("description")
+                                        or o.get("summary") or o.get("text"), 100)))
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(d)
+    return out
+
+# ---------- 每路专用解析（字段名各通道不同，别合并） ----------
+def r_bing():
+    t = load_text("bing.html")
+    if not t:
+        return None
+    out = []
+    for m in re.finditer(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', t, re.S | re.I):
+        u, ti = m.group(1), clean(m.group(2))
+        if ti and u.startswith("http"):
+            out.append((ti, u, ""))
+    return rowify(out)
+
+def r_se():
+    d = load_json("se.json")
+    if d is None:
+        return None
+    out = []
+    for i in d.get("items") or []:
+        x = f"score {i.get('score', '-')} · {i.get('answer_count', 0)} 答"
+        if i.get("is_answered"):
+            x += " · ✅已采纳"
+        out.append((i.get("title", ""), i.get("link", ""), x))
+    return rowify(out)
+
+def r_hn():
+    d = load_json("hn.json")
+    if d is None:
+        return None
+    out = []
+    for h in d.get("hits") or []:
+        u = h.get("url") or (f"https://news.ycombinator.com/item?id={h['objectID']}"
+                             if h.get("objectID") else "")
+        out.append((h.get("title", ""), u,
+                    f"{h.get('points', 0)} 分 · {h.get('num_comments', 0)} 评论"))
+    return rowify(out)
+
+def r_jj():
+    d = load_json("jj.json")
+    if d is None:
+        return None
+    out = []
+    def walk(o):   # 标题埋在 article_info 里，article_id 要拼 URL
+        if isinstance(o, dict):
+            ai = o.get("article_info")
+            if isinstance(ai, dict) and ai.get("title"):
+                aid = ai.get("article_id") or o.get("article_id")
+                out.append((ai.get("title", ""),
+                            f"https://juejin.cn/post/{aid}" if aid else "",
+                            trunc(ai.get("brief_content", ""), 90)))
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(d)
+    return rowify(out)
+
+def r_oalex():
+    d = load_json("oalex.json")
+    if d is None:
+        return None
+    return rowify([(w.get("display_name") or w.get("title") or "",
+                    w.get("id") or w.get("doi") or "",
+                    f"被引 {w.get('cited_by_count', 0)}")
+                   for w in d.get("results") or []])
+
+def r_crossref():
+    d = load_json("crossref.json")
+    if d is None:
+        return None
+    out = []
+    for it in (d.get("message") or {}).get("items") or []:
+        ti = it.get("title") or []
+        ti = ti[0] if isinstance(ti, list) and ti else (ti if isinstance(ti, str) else "")
+        yr = ""
+        try:
+            yr = str(it["published"]["date-parts"][0][0])
+        except Exception:
+            pass
+        out.append((ti, it.get("URL") or it.get("DOI") or "", yr))
+    return rowify(out)
+
+def r_segfault():
+    t = load_text("segfault.html")
+    if not t:
+        return None
+    return rowify([(clean(m.group(2)), "https://segmentfault.com" + m.group(1), "")
+                   for m in re.finditer(
+                       r'<a[^>]+href="(/a/[0-9A-Za-z_-]+)"[^>]*>(.*?)</a>', t, re.S | re.I)
+                   if len(clean(m.group(2))) > 4])
+
+def r_fcdev():
+    d = load_json("fcdev.json")
+    if d is None:
+        return None
+    items = d.get("data") if isinstance(d.get("data"), list) else None
+    if items is None:
+        return rowify(walk_generic(d))
+    return rowify([(it.get("title", ""), it.get("url", ""),
+                    trunc(it.get("description") or it.get("snippet") or "", 100))
+                   for it in items])
+
+def r_langsearch():
+    d = load_json("langsearch.json")
+    if d is None:
+        return None
+    if d.get("code") not in (None, 200):
+        return ("ERR", f"body code={d.get('code')} {trunc(d.get('msg', ''), 160)}")
+    vals = ((d.get("data") or {}).get("webPages") or {}).get("value") or []
+    out = []
+    for v in vals:
+        x = trunc(v.get("snippet") or v.get("text") or "", 100)
+        if v.get("datePublished"):
+            x = (x + " · " + v["datePublished"][:10])
+        out.append((v.get("name", ""), v.get("url", ""), x))
+    return rowify(out)
+
+def r_exa():
+    d = load_json("exa.json")
+    if d is None:
+        return None
+    if d.get("error"):
+        return ("ERR", trunc(d.get("error"), 200))
+    return rowify([(x.get("title", ""), x.get("url", ""),
+                    trunc(x.get("snippet") or x.get("text") or "", 100))
+                   for x in d.get("results") or []])
+
+def r_fcres():
+    d = load_json("fcres.json")
+    if d is None:
+        return None
+    for k in ("results", "data", "papers"):     # 顶层是 results（不是 data）
+        rows = d.get(k)
+        if not isinstance(rows, list):
+            continue
+        out = []
+        for x in rows:
+            u = x.get("url") or x.get("pdf_url") or ""
+            pid = str(x.get("primaryId") or "")
+            if not u and pid.startswith("arxiv:"):
+                u = "https://arxiv.org/abs/" + pid[6:]
+            elif not u and pid.startswith("DOI:"):
+                u = "https://doi.org/" + pid[4:]
+            out.append((x.get("title", ""), u, trunc(x.get("abstract") or "", 110)))
+        return rowify(out)
+    return rowify(walk_generic(d))
+
+def r_bd():
+    d = load_json("bd.json")
+    if d is None:
+        return None
+    return rowify(walk_generic(d))
+
+def r_v2ex():
+    """已退役 —— 2026-09-25 实测 /search?q= 302→/go/search，返回与 query 无关的节点帖子。
+    保留函数只为说明「为什么移除」，不要在 SECTIONS 里启用它。"""
+    return None
+
+# (key, 通道名, 说明, 解析函数, 仅 deep)
+SECTIONS = [
+    ("qianfan",  "百度千帆（生成式综合答案）",
+     "⚠️ AI 浓缩回答、非来源链接 —— 关键结论必须另找一手源验证",
+     lambda: load_text("qianfan.txt"), False),
+    ("bing",     "cn.bing（英文/技术）", "免 Key 不限量", r_bing, False),
+    ("fcdev",    "Firecrawl Developer Index（编程一手源 70M+）", "免 Key 不限量", r_fcdev, False),
+    ("se",       "StackExchange（报错排障）", "免 Key 不限量", r_se, False),
+    ("hn",       "Hacker News（深技术讨论）", "免 Key 不限量", r_hn, False),
+    ("jj",       "掘金（中文技术长尾）", "免 Key 不限量", r_jj, False),
+    ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
+    ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
+    ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
+    ("langsearch", "LangSearch count=20（时效/限域，$0 全功能）", "按 token 计；已 quota.py use", r_langsearch, True),
+    ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
+    ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不耗 credits；已 use", r_fcres, True),
+    ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
+    # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
+]
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "firecrawl"}
+
+def read_skip(key):
+    for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
+        p = os.path.join(tmp, f"skip.{c}")
+        if os.path.exists(p):
+            return pathlib.Path(p).read_text().strip()
+    return None
+
+def http_code(key):
+    """付费通道的 HTTP 状态码；没有记录返回 None。"""
+    t = load_text(key + ".http")
+    return t.strip() if t else None
+
+print(f"## fanout「{Q}」— {'deep 深调研档（14 路）' if DEEP == '1' else '默认档（9 路免费）'}\n")
+total, okc, dead, zero = 0, 0, [], 0
+for key, name, note, fn, deep_only in SECTIONS:
+    if ONLY and key not in ONLY:
+        continue                      # 本轮没请求这条路 → 不渲染（≠无响应）
+    if deep_only and DEEP != "1" and not os.path.exists(os.path.join(tmp, "skip." + key)):
+        continue
+    skip = read_skip(key)
+    if skip == "key":
+        print(f"### 🔇 {name} —— 未配置 API key（写入 `~/.config/agents/env` 即解锁）\n")
+        dead.append(name)
+        continue
+    if skip == "quota":
+        print(f"### 🔇 {name} —— 已越免费线，本轮自动跳过\n")
+        dead.append(name)
+        continue
+    try:
+        rows = fn()
+    except Exception as e:
+        rows = None
+    code = http_code(key)
+    if code and code not in ("200", "000") and (rows is None or rows == [] or isinstance(rows, tuple)):
+        print(f"### ⚠️ {name} —— HTTP {code}（参数/凭据/限流问题，不是「没搜到」）\n")
+        dead.append(name)
+        continue
+    if isinstance(rows, str):                      # 千帆文本
+        body = rows.strip()
+        if body:
+            okc += 1
+            print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
+        else:
+            print(f"### ❌ {name} —— 无返回\n"); dead.append(name)
+    elif isinstance(rows, tuple):                  # ("ERR", msg)
+        print(f"### ⚠️ {name} —— {rows[1]}\n"); dead.append(name)
+    elif rows is None:
+        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); dead.append(name)
+    elif not rows:
+        zero += 1
+        print(f"### ⚪ {name} —— 通道正常，0 命中\n")
+    else:
+        okc += 1
+        total += len(rows)
+        print(f"### ✅ {name}\n_{note}_\n")
+        for t, u, x in rows:
+            print(f"- [{t}]({u})" + (f" — {x}" if x else ""))
+        print()
+
+print(f"---\n**汇总**：{okc} 路有结果，共 {total} 条来源"
+      + (f"；{zero} 路 0 命中" if zero else "")
+      + (f"；跳过 {len(dead)} 路（{ '、'.join(dead) }）" if dead else "") + "。\n")
+print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
+      "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
+      "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
+PY
