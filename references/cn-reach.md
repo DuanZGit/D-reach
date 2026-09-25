@@ -41,9 +41,11 @@ curl -s -A "$UA" "https://www.so.com/s?q=关键词"
 #   grep -oE '<h3[^>]*class="res-title[^>]*>.{0,120}'
 ```
 
-**结论**：搜英文技术用 **cn.bing.com**；搜中文用 **百度千帆**（400/日）；两者都不够再上 BrightData 打 Google。
+**结论**：搜英文技术用 **cn.bing.com + LangSearch 双发**（LangSearch `count=20` 一次顶 cn.bing 5-10 倍信息量，
+且 $0 全功能）；搜中文用 **百度千帆**（400/日）；都不够再上 BrightData 打 Google（记得带 `format` 字段，漏了返 400）。
 时效/限域另有 **LangSearch**（`api.langsearch.com` 本机实测 200/1.5s，2026-09-22）——全功能免费（仅 daily token 额度），
-`freshness` + `include/excludeDomains` 是强项，英文与站内限定检索优先它；中文相关性一般，仍回千帆。
+`freshness` + `include/excludeDomains` + `count=50` 是强项，英文与站内限定检索**优先它**；中文相关性一般，仍回千帆。
+> 2026-09-25 起这些都交给 `scripts/fanout.sh` 一条命令并发铺开，不用再手打。
 
 ## 🟢 编程 / 排障（全部免 Key，不记账）
 
@@ -62,11 +64,15 @@ curl -s -A "$UA" -H "Content-Type: application/json" -X POST \
   "https://api.juejin.cn/search_api/v1/search" \
   -d '{"key_word":"deepseek","id_type":0,"cursor":"0","limit":5,"search_type":0}'
 # 返回 data[].result_model.article_info.{article_id,title,brief_content}
+#   → 文章 URL 要自己拼 https://juejin.cn/post/<article_id>
 
-# 博客园 / SegmentFault / OSCHINA / CSDN —— 可达，走站内搜索页 + 浏览器 UA 抓 HTML
-#   简中技术长尾内容（踩坑记录）比英文源更贴国内环境问题
-curl -s -A "$UA" "https://zzk.cnblogs.com/s?w=proot"
-curl -s -A "$UA" "https://segmentfault.com/search?q=proot"
+# SegmentFault —— ✅ 中文技术长尾（2026-09-25 复测：-L --compressed 200，13KB，/a/<id> 干净直出）
+curl -sL --compressed -A "$UA" "https://segmentfault.com/search?q=proot"
+#   grep -oE 'href="/a/[0-9A-Za-z_-]+"'  → 拼 https://segmentfault.com/a/<id>
+
+# ❌ 博客园 zzk.cnblogs.com —— 已退役（2026-09-25 复测 302→zzkx.cnblogs.com，
+#   跟随后只有 5.7KB 壳页、0 个结果链接；换 "python" 这类高频词也一样）→ 中文长尾改用 SegmentFault + 掘金
+# OSCHINA / CSDN —— 可达（未逐条验证），作为长尾补充
 ```
 
 ## 🟢 学术（免 Key）
@@ -107,7 +113,7 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 |------|------|------|
 | 小红书 `xhs` CLI | ✅ 已登录 | `xhs search` / `xhs comments`（消费决策主力，见 SKILL 铁律） |
 | B站 `bili` CLI | ✅ | 字幕 + AI 总结 + 评论（见 SKILL 铁律） |
-| V2EX | ⚠️ 接口时通时断 | 通了就用，断了换 cn.bing 站内 |
+| V2EX | ❌ **搜索已退役**（2026-09-25：`/search?q=` 302→`/go/search`，返回「搜索引擎技术研究」节点帖子、与 query 无关 → 会给**假结果**） | 换 cn.bing 站内 `site:v2ex.com` 或掘金/SegmentFault |
 | 豆瓣 | ✅ `search.douban.com/book/subject_search?search_text=X`，结果在 `window.__DATA__` JSON | 书/影/音评分与短评 |
 | 微博 | 302（需登录） | browser_use |
 | 知乎 | 403（web + api 均被拦） | browser_use 交互，或千帆搜知乎快照 |
@@ -127,18 +133,22 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 ## 路由优先级（国内环境）
 
 ```
-中文搜索      → 百度千帆(400/日)          → cn.bing（弱） → BrightData Google
-英文技术      → cn.bing                   → Exa           → BrightData Google
-代码报错      → StackExchange API         → Firecrawl Dev Index → cn.bing 站内
-中文技术长尾  → 掘金 API / 博客园 / SegmentFault / OSCHINA
-深度讨论      → HN Algolia                → V2EX
+中文搜索      → 百度千帆(400/日)          → cn.bing（弱） → BrightData Google（带 format 字段）
+英文技术      → cn.bing + LangSearch 双发   → Exa           → BrightData Google
+代码报错      → StackExchange API         → Firecrawl Dev Index（免 key）→ Fanout 默认档
+中文技术长尾  → 掘金 API + SegmentFault    → cn.bing 站内（博客园/V2EX 已退役）
+深度讨论      → HN Algolia                → cn.bing 站内 site:v2ex.com
+公司/人物/产品 → 千帆百科星图(knowledge)   → 百度百科词条  → Exa
 学术          → OpenAlex → Crossref       → Firecrawl Research（arXiv 不可达）
-公司/专有名词 → 百度百科(千帆)             → cn.bing 站内
 A股公告       → 巨潮资讯 cninfo           → 东方财富
 消费决策      → 小红书 → B站              → 豆瓣
 行业资讯      → 36氪 / InfoQ / 澎湃 / 界面
 强反爬        → BrightData → Jina         → browser_use
 ```
 
+> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 9 路 + `--deep` 4 路）
+> 一次并发打完，**别逐条手 curl** —— 实测 3 路串行 2.95s vs 并行 1.30s。
+
 > **记账规则**：本文件所有通道 **免 Key 且不限量 → 不执行 `quota.py use`**。
-> 只有 BrightData / Exa / Firecrawl SDK / Jina 才记账。
+> 只有 BrightData / Exa / Firecrawl SDK / Jina / LangSearch 才记账；`fanout.sh --deep` 已自动处理
+> （越免费线自动跳过该路并在输出里标 🔇），**不要脚本之外再手动 `use`，会双扣**。

@@ -8,6 +8,10 @@ description: >
   想读一篇文章或链接（读一下/打开这个/看看链接）、想查社交平台内容（小红书/B站/微博/推特/Reddit）、
   想找 GitHub 仓库或代码、想要视频字幕、想查股票行情，或者需要任何需要当前网络信息的调研——
   即使用户没有点名具体平台，也使用本技能。
+  口语变体同样算触发：全网看一下 / 去网上看看 / 看看有没有 / 有没有类似（项目·插件·工具）/ 现成的吗 /
+  帮我找个 / 找一下有没有 / 查一下是不是真的 / 对比一下几个方案 / 求推荐。判据是「结论是否依赖当前网络上的信息」，
+  不是词面本身——只要依赖外部信息就走本技能，先 read 本 SKILL.md 再用路由表选通道，
+  不要直接调内置 web_search / fetch_content（那会绕开额度记账与免费通道优先原则）。
   不要用于有独立触发词的领域技能：食谱/健康（DK）、个股分析流程（gushen）、深度研究报告（research）。
 license: MIT
 metadata:
@@ -27,8 +31,12 @@ metadata:
 ## 决策流程（默认 L2，见下节）
 
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
-2. **铺开通道**：查下方路由表，把该档要求的通道**一次全起**，不是只取一行首选。
-   免费免 Key 通道（✅免）优先铺满 —— 它们不限量，闲着才是浪费
+2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
+   L2 起一律走它：**默认 9 路免费免 Key 并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
+   Firecrawl-Research / BrightData-Google（约 10-15s）。**别一条一条串行试** ——
+   实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
+   L1 点查可只跑两路互证：`fanout.sh "<query>" --on bing,<最相关一路>`
+   想知道单路返回什么/排查某通道时，用 `--on <通道名>` 隔离测试（通道名见 fanout.sh 头注释）
 3. **记账**：限额通道（⏱）调用前 `python3 scripts/quota.py use <svc>`
    - exit 0 → 正常用
    - **exit 2 → 已过 30% 裕度线（仍记账）**：这一路后续只用在免费通道拿不到的内容上
@@ -42,33 +50,49 @@ metadata:
 
 ## 调研强度（默认 L2）
 
-> 定档依据来自实测：d-reach 是低频技能（近 30 天仅 20 个会话用到），而限额通道余量 >95%
-> （BrightData 月用 152/5000、Exa 3/1000、Firecrawl 1/1000）。**单次做深**比「每次都浅」划算得多。
+> 定档依据来自实测（2026-09-25）：d-reach 是低频技能，而限额通道余量极度富余 ——
+> BrightData 163/5000、Exa 3/1000、Firecrawl 1/1000、**LangSearch 本月 0 次**、
+> 千帆搜索类 19/350、千帆百科星图/识图/秒懂/Query改写 0/310。
+> **浅搜才是真正的浪费**：单次做深、一次搜透，比来回补搜省总 token。
 
 | 档 | 什么时候用 | 最小独立来源 | 轮次 | 硬要求 |
 |---|---|---|---|---|
 | **L1 点查** | 单一事实：版本号 / 价格 / 日期 / 某人某物是否存在 | 2 | 1 | 两个独立来源互证；打架就升 L2 |
-| **L2 对比·选型**（默认） | 「哪个好 / 怎么选 / 求推荐 / 怎么样 / 值不值」 | 4 | 2（发现轮 → 追证轮） | ≥2 类通道且免费优先；≥1 条一手源（官方文档 / 论文原文 / 原帖 / 公告） |
-| **L3 深调研** | 用户明说「调研 / 报告 / 全面 / 系统性对比 / 出一份」 | 6 | 3（广撒 → 追深 → 反证） | ≥1 条**反方来源**（缺点 / 失败案例 / 相反结论）；交付可引用清单 |
+| **L2 对比·选型**（默认） | 「哪个好 / 怎么选 / 求推荐 / 怎么样 / 值不值 / 靠不靠谱」 | 6 | 2（发现轮 → 追证轮） | ≥2 类通道且免费优先；≥1 条一手源（官方文档 / 论文原文 / 原帖 / 公告） |
+| **L3 深调研** | 用户明说「调研 / 报告 / 全面 / 系统性 / 出一份」；**或**命中自动升档触发器 | 10 | 3（广撒 → 追深 → 反证） | ≥1 条**反方来源**（缺点 / 失败案例 / 相反结论）；交付可引用清单 |
 
 **独立来源** = 不同域名或不同主体；同一篇文章被转载 5 次仍算 1 个。
-不确定档位时取高一档（多查一条比漏查一条便宜）。
 
-**广度**：同一问题至少 3 种改写（原词 → 同义/上下位 → 英文 → 限定域 `site:` → 时效问题加时间），
+**自动升档（b1）**：问题文本命中下列任一类词 → 直接按 **L3** 跑，不必等用户说「调研」：
+`对比` `选型` `哪家` `哪个好` `怎么样` `靠不靠谱` `值不值` `为什么` `原理` `最新` `动态`
+`演进` `替代` `方案` `盘点` `排行榜` `测评` `benchmark` `vs`。
+只有用户明说「快速 / 简单 / 大概知道一下」才压回 L2 / L1。**拿不准就取高一档**（多查一条比漏查一条便宜得多）。
+
+**广度**：同一问题至少 **5 种**改写 —— 原词 → 同义/上下位 → 英文 → 限定域（`site:` /
+LangSearch `includeDomains`）→ 时效加日期 → 再加一条**反方问法**（`缺点 / 不推荐 / 坑 / 争议`）。
+嫌手写慢就让千帆「智能Query改写」(10/日) 批量生成变体。
 反证独立走一轮（`<主题> 缺点 / 失败 / 不推荐 / 争议`）。模板与分档调用序列见
 [references/search.md](references/search.md)。
 
-**免费优先**：cn.bing / StackExchange / HN Algolia / OpenAlex / Crossref / 掘金 / 博客园 /
-36氪 / 豆瓣 / gh CLI / DeepWiki / V2EX 不限量且不记账 —— L2 至少试其中 3 条，L3 至少 5 条；
-限额通道只用在它们拿不到的内容上。
+**追深（b3）**：首轮 fanout 输出末尾要人肉/自动把冒出来的**人名、机构名、版本号、
+术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
+再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
+
+**免费优先**：`fanout.sh` 默认档一次并发 **9 路**免费免 Key 通道（cn.bing / Firecrawl Developer /
+StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆）—— 它们不限量、不记账，
+**闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research / BrightData 是限额/计 token 通道，
+**L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
 
 ## 收尾自查（交付前逐条过）
 
-- [ ] 独立来源数达标？（L1: 2 / L2: 4 / L3: 6）
+- [ ] 独立来源数达标？（**L1: 2 / L2: 6 / L3: 10**）
 - [ ] 每条关键结论都有来源，且至少 1 条**一手源**？（官方文档 / 论文原文 / 原帖 / 公告，非二手转述）
 - [ ] 有没有哪条结论**只有一个来源**？→ 补一条独立佐证，或降级为「未证实」
+- [ ] 查询改写做了 **≥5 种**吗？（原词/同义/英文/限域/时效，外加一条反方问法）
+- [ ] 追深轮做了吗？首轮冒出的人名/机构/版本/术语**回灌**了吗？
 - [ ] L3：反方来源找到了吗？找不到也要如实说「未发现反例」，不能假装没有
-- [ ] 免费通道铺开了吗？（别一上来就把限额通道打光）
+- [ ] L3：`fanout.sh --deep` 铺了吗？（LangSearch / Exa / FC-Research / BrightData 月余量 >96%，不必省）
+- [ ] ❌/⚠️ 的路注明原因了吗？（别把「请求失败」写成「搜不到」——那会把工程问题伪装成事实结论）
 - [ ] 有没有把「搜不到」当成「不存在」？要说明试过哪些通道
 
 ## 凭据接口（key 从哪来，技能不管）
@@ -94,6 +118,35 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
 | LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
 
+## 铺开器 fanout.sh（L2 起必用）
+
+```bash
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：9 路免费并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/BrightData（~12s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing,hn  # 只跑指定路（点名 deep 通道会自动开 deep）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条
+```
+
+**输出怎么读**（每种标记对应不同动作，别混）：
+
+| 标记 | 含义 | 该做什么 |
+|---|---|---|
+| ✅ | 该路有 N 条来源 | 直接读，进入追深轮 |
+| ⚪ 通道正常，0 命中 | 请求成功但这批源没有相关内容 | 换改写词重试，不是通道坏 |
+| ❌ 通道无响应/超时 | 超时或结构突变 | 按「先重试再换」纪律重试 1 次；连续失败记进 `cn-reach.md` |
+| ⚠️ HTTP 4xx/5xx | 参数/凭据/限流问题 | 看状态码修请求（例：BrightData 漏 `format` 会 400），**不是「没搜到」** |
+| 🔇 未配置 key / 已越免费线 | 自动跳过 | 补 key 或换路，不阻塞其他路 |
+| 💬 百度千帆段 | **AI 生成的浓缩回答，不是来源链接** | 只能当线索/关键词提取器；关键结论必须另找一手源 |
+
+逐路格式与字段坑（OpenAlex 用 `display_name`+`id`、Crossref 用大写 `URL`、掘金标题埋在
+`article_info` 里、LangSearch 在 `data.webPages.value[]`、Firecrawl Research 顶层是 `results`
+且 `primaryId` 是 `arxiv:xxx`）已全部处理在脚本里，**新增通道时照这个模式加专用解析函数，
+不要指望一个通用 harvest 覆盖所有 schema**。
+
+**已退役通道**（2026-09-25 实测，别往回加）：
+博客园 `zzk.cnblogs.com`（302→zzkx 返回 5.7KB 壳页、0 结果）、
+V2EX `/search?q=`（302→`/go/search`，返回与 query 无关的节点帖子 —— **假结果比无响应更毒**）。
+
 ## 路由表
 
 > **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
@@ -103,13 +156,15 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
 | 中文搜索 | 百度千帆（自带计数器） | cn.bing 站内 ⏱ | BrightData ⏱ |
-| 英文/技术搜索 | **cn.bing** ✅免 | LangSearch ⏱ / Exa ⏱ | BrightData ⏱ |
-| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
+| 英文/技术搜索 | **cn.bing ✅免 + LangSearch ⏱ 双发**（LangSearch `count=20`，$0 全功能：时效/限域/全文） | Exa ⏱ | BrightData ⏱ |
+| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
-| 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |
+| 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | cn.bing 站内 |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
-| 学术论文 | **OpenAlex / Crossref** ✅免 | Firecrawl Research Index ✅免 | Semantic Scholar ✅免 |
-| 公司/专有名词背景 | 百度百科（千帆） | **cn.bing 站内** ✅免 | BrightData ⏱ |
+| 学术论文 | **OpenAlex / Crossref ✅免 + Firecrawl Research ⏱**（L3 无条件铺，它免 credits 只要 key） | Semantic Scholar ✅免 | Jina 读原文 ⏱ |
+| 公司/专有名词背景 | **千帆百科星图**（`dispatch knowledge` 200/日）+ 百度百科词条 | cn.bing 站内 ✅免 | Exa ⏱ |
+| 图片/截图找来源 | 千帆相似图搜索（100/日） | 千帆智能识图（100/日） | cn.bing 站内 |
+| 概念科普补全 | 千帆秒懂百科（100/日，短视频脚本式讲解） | 百度百科词条 | cn.bing
 | 深度技术讨论 | **HN Algolia** ✅免 | V2EX ✅免 | cn.bing |
 | A股公告/披露 | **巨潮资讯 cninfo** ✅免 | gushen（雪球） | 东方财富 |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
@@ -168,7 +223,16 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 
 ```bash
 # 百度千帆（400 次/日免费，配额由该技能自己记账，不要重复扣）
+# 普通搜索（生成式答案，fanout 里那一路走的就是它）
 python3 $SKILLS/baiduaisearchwithquota/scripts/smart_search.py search '查询'
+
+# ---- 2026-09-25 起接通的「0/310 闲置工具」（KB-a3），全部走 dispatch 按场景调度 ----
+# knowledge 场景（200/日）：百科星图列表/详情 —— 公司/人物/产品的关联实体图谱，比百科词条更能"一圈圈挖"
+python3 $SKILLS/baiduaisearchwithquota/scripts/quota_manager.py dispatch knowledge '比亚迪 产业链'
+# 智能 Query 改写（10/日）：把手上的一个问题批量翻成多种问法 —— 查询改写矩阵 ≥5 种的自动生成器
+python3 $SKILLS/baiduaisearchwithquota/scripts/quota_manager.py dispatch search 'ollama vs vllm'   # 见 quota_manager.py list 取准确子命令名
+# 智能识图 / 相似图搜索（100/日 each）、秒懂百科（100/日）同理走 dispatch content|knowledge
+# ⚠️ 千帆工具清单与子命令名以 quota_manager.py list 为准，别照记忆写
 
 # Exa（英文/技术）
 curl -s --max-time 30 -X POST https://api.exa.ai/search \

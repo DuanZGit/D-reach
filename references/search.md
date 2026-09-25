@@ -10,72 +10,91 @@
 
 定档表在 `SKILL.md`。这里只给「一次到底发几条」的样板。
 
+> **2026-09-25 起一律走 `fanout.sh`**：一条命令并发铺开，别照下面的老样例一条一条 curl。
+> 本节保留是因为它解释**每一轮在干嘛**——fanout 只把「铺开」这一个动作自动化了。
+
+```bash
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：9 路免费并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep    # L3：+LangSearch/Exa/FC-Research/BrightData
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing   # L1：单路点查，再配一手源
+```
+
 **L1 点查**（2 来源 / 1 轮）—— 例：查某库版本发布日期
 
 ```bash
-UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
-# 免费两路互证（不记账）
-curl -s -A "$UA" "https://cn.bing.com/search?q=Rust+1.90+release+date"
-curl -s "https://hn.algolia.com/api/v1/search?query=Rust+1.90&hitsPerPage=5"
+bash $SKILLS/d-reach/scripts/fanout.sh "Rust 1.90 release date" --on bing
 # 一手源优先：直接读官方公告原文（Jina，记账）
 curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 ```
 
-**L2 对比·选型**（4 来源 / 2 轮 / 免费≥3 条）—— 默认档
+**L2 对比·选型**（6 来源 / 2 轮 / 免费优先）—— 默认档
 
-| 轮 | 做什么 | 典型通道 |
+| 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 轮 1 发现 | 中英文各一路 + 真实使用体验 + 中文长尾 | cn.bing（英文）、千帆（中文）、StackExchange / HN、掘金 / 博客园 |
-| 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补一轮反向体验 | 官方文档（Jina 读原文）、`<候选> vs`、`<候选> 问题` |
+| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 9 路） |
+| 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补反向体验 | Jina 读官方文档原文；`<候选> vs`、`<候选> 问题`、`<候选> 替代` |
 
-只有 Exa / BrightData / Jina 才 `quota.py use`；上文其余通道免费。
+只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 默认档
+那 9 路全免费，`--deep` 的 4 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
 
-**L3 深调研**（6 来源 / 3 轮 / 必含反证）
+**L3 深调研**（10 来源 / 3 轮 / 必含反证）
 
-| 轮 | 做什么 | 典型通道 |
+| 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 1 广撒 | 中英文 + 学术 + 行业 + 代码仓 各一路 | cn.bing、千帆、OpenAlex/Crossref、36氪/InfoQ、gh CLI / DeepWiki |
-| 2 追深 | 把首轮捞到的人名/机构/版本/术语回灌成新查询 | 同轮 1，换成更具体的限定词 |
-| 3 反证 | `<主题> 缺点/失败/不推荐/争议/vs 替代` | cn.bing、HN、V2EX、知乎（千帆快照）|
+| 1 广撒 | 中英文 + 学术 + 编程一手源 + 全网覆盖一次全铺 | `fanout.sh "<query>" --deep`（13 路） |
+| 2 追深 | 把首轮捞到的人名/机构/版本/术语回灌成新查询 | `fanout.sh "<回灌词> 原理/对比/评测" --deep` |
+| 3 反证 | `<主题> 缺点/失败/不推荐/争议/vs 替代` | `fanout.sh "<主题> 缺点 不推荐" --deep`；反证轮**不并入**前两轮计数 |
 
 交不了差就老实写「未发现反例 + 试过哪些通道」，**不编造**。
 
-## 广度：查询改写矩阵（至少 3 种）
+## 广度：查询改写矩阵（至少 5 种）
 
 | 改写方向 | 例（问：「DeepSeek Harness 靠谱吗」） |
 |---|---|
 | 原词 | `DeepSeek Harness` |
 | 同义 / 上下位 | `DeepSeek 自动化测试工具` / `LLM 测试框架 对比` |
 | 英文（英文源信息密度高） | `DeepSeek Harness review` / `agent harness benchmark` |
-| 限定域（找一手源） | `site:github.com` / `site:docs.xxx.com` / 学术走 OpenAlex |
-| 时效（时效类问题必加） | `after:2026-06-01` / 中文加「2026」/ BrightData 加 `&tbs=qdr:m` |
+| 限定域（找一手源） | `site:github.com` / `site:docs.xxx.com` / LangSearch `includeDomains:[...]` |
+| 时效（时效类问题必加） | `after:2026-06-01` / 中文加「2026」 / LangSearch `freshness:oneMonth` / BrightData `&tbs=qdr:m` |
+| **反方问法**（新） | `DeepSeek Harness 缺点 / 不推荐 / 坑 / 争议 / 替代品` |
 
-**反证独立走一轮**（L3 必做）：`<主题> 缺点` / `失败` / `不推荐` / `争议` / `vs 替代品`。
+懒得多想就让**千帆「智能Query改写」(10/日)** 把一个问题批量翻成多种问法，再挑几条去打。
+
+**反证独立走一轮**（L3 必做）：`<主题> 缺点` / `失败` / `不推荐` / `争议` / `vs 替代品`，
+且**不并入**前两轮的来源计数。
 
 ## 免费通道铺开清单（不限量，深挖主力）
 
-| 场景 | 通道 | 命中数（L2 建议） |
-|---|---|---|
-| 英文/技术 | cn.bing | 2-4 |
-| 报错/排障 | StackExchange `search/advanced?q=` | 1-2 |
-| 深度讨论 | HN Algolia | 1-2 |
-| 学术 | OpenAlex → Crossref | 1-2 各 |
-| 中文技术长尾 | 掘金 API / 博客园 zzk / SegmentFault | 1-2 |
-| 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 | 1-2 |
-| 书影音评分 | 豆瓣 `window.__DATA__` | 1 |
-| 代码/仓库 | gh CLI search / DeepWiki `ask_question` | 1-3 |
-| A 股公告 | 巨潮 cninfo | 1-2 |
-| 微信公众号 | weixin.sogou.com | 1 |
+> **别逐条手打** —— 这些里能一起铺的已经被 `fanout.sh` 默认档一次并发打完了
+> （cn.bing / FirecrawlDev / StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref /
+> 千帆共 9 路）。下表留作「fanout 没覆盖到的场景」查漏。
 
-> 这些通道 **不要 `quota.py use`**（不记账、不限量）。限额通道只用在它们拿不到的地方：
-> 强反爬页、需登录站、中文搜索溢出（千帆 >400/日 时）。
+| 场景 | 通道 | 命中数（L2 建议） | fanout 覆盖？ |
+|---|---|---|---|
+| 英文/技术 | cn.bing | 2-4 | ✅ 默认档 |
+| 报错/排障 | StackExchange `search/advanced?q=` | 1-2 | ✅ 默认档 |
+| 深度讨论 | HN Algolia | 1-2 | ✅ 默认档 |
+| 学术 | OpenAlex → Crossref | 1-2 各 | ✅ 默认档 |
+| 编程一手源 | Firecrawl Developer Index（免 key） | 2-5 | ✅ 默认档 |
+| 中文技术长尾 | 掘金 API / SegmentFault（~~博客园~~已退役） | 1-2 | ✅ 默认档 |
+| 中文综合回答 | 百度千帆（生成式，非来源） | 1 | ✅ 默认档（标 💬） |
+| 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 | 1-2 | ❌ 需手打 |
+| 书影音评分 | 豆瓣 `window.__DATA__` | 1 | ❌ 需手打 |
+| 代码/仓库 | gh CLI search / DeepWiki `ask_question` | 1-3 | ❌ 需手打 |
+| A 股公告 | 巨潮 cninfo | 1-2 | ❌ 需手打 |
+| 微信公众号 | weixin.sogou.com | 1 | ❌ 需手打 |
+
+> `--deep` 追加的 LangSearch / Exa / Firecrawl-Research / BrightData-Google 是限额/计 token 通道，
+> 脚本会自动 `quota.py use`；这些通道 **不要 `quota.py use` 之外再手动 use**（会双扣）。
+> deep 四路的月余量实测 >96%（LangSearch 本月 0 次、Exa 3/1000、Firecrawl 1/1000、BrightData 163/5000）——
+> **L3 无条件铺，不必省**。
 
 ## 搜索路由（速查，完整见 SKILL.md）
 
 | 场景 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆（`smart_search.py dispatch search`） | cn.bing 站内 | BrightData REST |
-| 英文/技术搜索 | **cn.bing** ✅免 | LangSearch REST ⏱ / Exa REST | BrightData REST（Google） |
+| 中文搜索 | 百度千帆（`smart_search.py search`，生成式答案） | cn.bing 站内 | BrightData REST |
+| 英文/技术搜索 | **cn.bing ✅免 + LangSearch ⏱ 双发**（`count=20`） | Exa REST ⏱ | BrightData REST（Google） |
 | 时效/限域检索 | LangSearch REST ⏱（freshness + include/excludeDomains） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
 | 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |

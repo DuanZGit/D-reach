@@ -6,7 +6,8 @@
 gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browser_use。
 
 **设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
-唯一的代码是 `scripts/quota.py`（约 100 行），只做一件事：记免费额度，防止越过免费线产生费用。
+代码只有两个小件：`scripts/quota.py`（约 200 行）记免费额度防越线，
+`scripts/fanout.sh`（一条命令并发铺开 9 路免费 + `--deep` 4 路限额通道）。
 
 ## 用法
 
@@ -26,8 +27,16 @@ python3 scripts/quota.py reset brightdata
 
 调用方式全部在 [`SKILL.md`](./SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
 
-**调研强度默认 L2**（≥4 个独立来源 + 2 轮），L1/L2/L3 的定档依据、广度要求与收尾自查见 SKILL.md。
-免费免 Key 通道不记账，**深挖时优先铺满它们**。
+```bash
+# L2 起别逐条手打 —— 一条命令并发铺开（默认档 9 路免费免 Key，~5s）
+bash scripts/fanout.sh "ollama vs vllm"
+# L3 深调研：追加 LangSearch / Exa / Firecrawl-Research / BrightData（~12s，自动记账）
+bash scripts/fanout.sh "ollama vs vllm" --deep
+```
+
+**调研强度默认 L2**（≥6 个独立来源 + 2 轮），命中「对比/选型/调研/为什么/最新/vs」等词自动升 L3
+（≥10 来源 + 3 轮）。定档依据、查询改写 ≥5 种、收尾自查见 SKILL.md。
+免费免 Key 通道不记账，**fanout 默认档已一次并发铺满；deep 四路月余量 >96%，L3 无条件铺**。
 
 ## 免费额度一览
 
