@@ -31,7 +31,7 @@ metadata:
 > 🔴 **RED LINE —— 每次搜索前先过这一条**
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
-> 只打一路（哪怕 cn.bing 出了结果）就下结论 = 违规。
+> 只打一路（哪怕第一路出了结果）就下结论 = 违规。
 > 理由很直白：14 条路里 9 路免费不限量、4 路限额通道月余量 >96%（LangSearch 本月 0 次、
 > Exa 3/1000、Firecrawl 1/1000、BrightData 163/5000）—— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on bing,<最相关一路>`）。
@@ -92,7 +92,7 @@ metadata:
 LangSearch `includeDomains`）→ 时效加日期 → 再加一条**反方问法**（`缺点 / 不推荐 / 坑 / 争议`）。
 嫌手写慢就让千帆「智能Query改写」(10/日) 批量生成变体。
 **语义通道的 query 控制在 4–6 个词**（c2 实测：9 个词把 LangSearch 稀释成维基泛条目，换 4 词后
-Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 cn.bing `site:` 和 Firecrawl Developer 过滤。
+Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSearch `includeDomains` 和 Firecrawl Developer 过滤。
 反证独立走一轮（`<主题> 缺点 / 失败 / 不推荐 / 争议`）。模板与分档调用序列见
 [references/search.md](references/search.md)。
 
@@ -100,7 +100,7 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 cn.bin
 术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
 再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
 
-**免费优先**：`fanout.sh` 默认档一次并发 **9 路**免费免 Key 通道（cn.bing / Firecrawl Developer /
+**免费优先**：`fanout.sh` 默认档一次并发 **9 路**免费免 Key 通道（cn.bing⚠️已投毒 / Firecrawl Developer /
 StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆）—— 它们不限量、不记账，
 **闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research / BrightData 是限额/计 token 通道，
 **L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
@@ -169,6 +169,19 @@ bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几
 博客园 `zzk.cnblogs.com`（302→zzkx 返回 5.7KB 壳页、0 结果）、
 V2EX `/search?q=`（302→`/go/search`，返回与 query 无关的节点帖子 —— **假结果比无响应更毒**）。
 
+**cn.bing `/search?q=` —— 2026-10-05 判定失效（投毒，不是挂了）**：
+HTTP 200、结果页结构完好、`<h2><a>` 抓得到 10 条，但**内容与 query 完全无关**。同日实测：
+查「意式咖啡豆 中深烘 拿铁」→ 法语「巴西米饭做法」（recettes-culinaires.fr / fr.wikihow）；
+查「espresso coffee bean medium dark roast」→「espresso（一种特浓咖啡）_百度百科」；
+另一轮中文 query → 繁体鸡汤食谱（愛料理）/ 乌尔都语诗歌站。
+**同一 query 稳定复现**，且**加随机 `&_=` 参数 / `Cache-Control: no-cache` / 换移动端 UA / 换 `mkt=zh-CN` 全部无效**
+→ 判定为服务端反爬投毒，既不是缓存串号也不是解析器 bug。
+**假结果比无响应更毒**（同 V2EX 教训：它伪装成 ✅ 有结果，比超时更容易骗过收尾自查）。
+处置：
+- `r_bing` 已加**相关性闸门**（标题与 query 的词/二字片段重合 <2 个即剔除；全被剔除则输出
+  `⚠️ 结果与查询完全无关（疑似反爬投毒）`，不再打 ✅）。闸门只防伪不补能力 —— **bing 这一路视为常年不可用**。
+- 路由表内所有 `❌cn.bing（投毒）` 单元格一律不要走；中文/时效搜索压 LangSearch + 千帆 + BrightData。
+
 ## 路由表
 
 > **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
@@ -177,21 +190,22 @@ V2EX `/search?q=`（302→`/go/search`，返回与 query 无关的节点帖子 �
 
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆（自带计数器） | cn.bing 站内 ⏱ | BrightData ⏱ |
-| 英文/技术搜索 | **cn.bing ✅免 + LangSearch ⏱ 双发**（LangSearch `count=20`，$0 全功能：时效/限域/全文） | Exa ⏱ | BrightData ⏱ |
-| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
-| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
-| 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | cn.bing 站内 |
+| 中文搜索 | 百度千帆（自带计数器） | ❌cn.bing（投毒） | BrightData ⏱ |
+| 英文/技术搜索 | **LangSearch ⏱**（`count=20`，$0 全功能：时效/限域/全文；cn.bing 已投毒勿用） | Exa ⏱ | BrightData ⏱ |
+| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | ❌cn.bing（投毒） | BrightData `&tbs` ⏱ |
+| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | ❌cn.bing（投毒） |
+| 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | ❌cn.bing（投毒） |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
 | 学术论文 | **OpenAlex / Crossref ✅免 + Firecrawl Research ⏱**（L3 无条件铺，它免 credits 只要 key） | Semantic Scholar ✅免 | Jina 读原文 ⏱ |
-| 公司/专有名词背景 | **千帆百科星图**（`dispatch knowledge` 200/日）+ 百度百科词条 | cn.bing 站内 ✅免 | Exa ⏱ |
-| 图片/截图找来源 | 千帆相似图搜索（100/日） | 千帆智能识图（100/日） | cn.bing 站内 |
-| 概念科普补全 | 千帆秒懂百科（100/日，短视频脚本式讲解） | 百度百科词条 | cn.bing
-| 深度技术讨论 | **HN Algolia** ✅免 | V2EX ✅免 | cn.bing |
+| 公司/专有名词背景 | **千帆百科星图**（`dispatch knowledge` 200/日）+ 百度百科词条 | ❌cn.bing（投毒） | Exa ⏱ |
+| 图片/截图找来源 | 千帆相似图搜索（100/日） | 千帆智能识图（100/日） | ❌cn.bing（投毒） |
+| 概念科普补全 | 千帆秒懂百科（100/日，短视频脚本式讲解） | 百度百科词条 | —
+| 深度技术讨论 | **HN Algolia** ✅免 | V2EX ✅免 | ⚠️V2EX 搜索已退役 |
 | A股公告/披露 | **巨潮资讯 cninfo** ✅免 | gushen（雪球） | 东方财富 |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
 | 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 ✅免 | 百度千帆 | — |
 | 书影音评分 | 豆瓣 `window.__DATA__` ✅免 | 百度千帆 | — |
+| **普通网页/官方文档（不反爬）** | **直接 `curl` fetch ✅免**（JS 渲染站才用 `browser_use`） | Jina ⏱ | BrightData ⏱ |
 | 网页抓取（反爬） | BrightData ⏱ | Jina ⏱ | browser_use ⏱ |
 | 批量网页抓取 | BrightData（循环单抓，≤10）⏱ | Jina ⏱ | — |
 | GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Gitee ✅免 |
@@ -208,6 +222,17 @@ V2EX `/search?q=`（302→`/go/search`，返回与 query 无关的节点帖子 �
 
 `arxiv.org` / `zh.wikipedia.org` / `html.duckduckgo.com` / `scholar.google.com` / `chinaxiv.org` — 全部 000。
 替代链见 [cn-reach.md](references/cn-reach.md)。
+
+### 🔴 抓取侧已确认被反爬拦（2026-10-05 实测，别浪费轮次）
+
+| 目标 | 现象 | 出路 |
+|---|---|---|
+| 京东搜索 `search.jd.com/Search?keyword=` | 302 → 风控页 `JDR_shields`（`-L --compressed` 也一样，返回 957B 验证脚本） | 住宅代理（BrightData 需 KYC）；或走榜单/快照 |
+| 知乎 `zhuanlan.zhihu.com` | 裸 curl 返回空壳（仅「让每一次点击都充满意义」）；**Jina Reader 也拿到「安全验证」页** | 千帆搜快照 / browser_use |
+| BrightData 抓知乎 | `bad_endpoint: Requested site is not available ... robots.txt`（无 KYC 的住宅模式被拒） | 做 KYC 后可用 |
+| B站字幕 `bili video -s` | 大量视频 `subtitle.available: false` —— **是视频本身没字幕，不是 CLI 坏**（bili 0.6.2 已是 PyPI 最新） | 改用 `--ai` 摘要 + `-c` 评论区 |
+
+> 另：新浪财经/腾讯新闻类页面常需 JS 渲染，裸 curl 只得骨架，直接换 `browser_use`。
 
 > ⚠️ **000 ≠ 通道挂了**（2026-09-22 复检教训）：上表之外，`github.com` / `api.stackexchange.com` /
 > `r.jina.ai` / DeepWiki MCP 都曾被误判 000 而其实正常——**探活只认 GET + 重试 1 次**，
@@ -326,7 +351,7 @@ python3 $SKILLS/d-reach/scripts/quota.py reset brightdata
 | 1 | 越免费线（**不记账**） | 立刻换备选 / 免费通道 |
 
 **留 30% 裕度**：日线和月线都按 70% 设线，剩下 30% 留给当天突发任务。
-免费免 Key 通道（cn.bing / StackExchange / HN / OpenAlex / Crossref / 掘金 / 博客园 /
+免费免 Key 通道（cn.bing⚠️已投毒 / StackExchange / HN / OpenAlex / Crossref / 掘金 / 博客园 /
 36氪 / 豆瓣 / gh CLI / DeepWiki / V2EX）**不限量、不记账 → 深挖时优先铺满它们**，
 这才是「用足日额度」的正确姿势。
 
