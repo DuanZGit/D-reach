@@ -260,6 +260,14 @@ def walk_generic(d):
     return out
 
 # ---------- 每路专用解析（字段名各通道不同，别合并） ----------
+def _query_tokens(q):
+    """把 query 切成可比对的 token：西文 ≥4 字母词 + 中文二字片段。"""
+    q = clean(q).lower()
+    toks = set(re.findall(r"[a-z]{4,}", q))
+    cjk = re.sub(r"[^\u4e00-\u9fff]", "", q)
+    toks.update(cjk[i:i + 2] for i in range(len(cjk) - 1))
+    return toks
+
 def r_bing():
     t = load_text("bing.html")
     if not t:
@@ -269,7 +277,23 @@ def r_bing():
         u, ti = m.group(1), clean(m.group(2))
         if ti and u.startswith("http"):
             out.append((ti, u, ""))
-    return rowify(out)
+    rows = rowify(out)
+    # 🕳️ 投毒闸门（2026-10-05 实测）：cn.bing 对本机 HTTP 200 + 页面结构正常，但返回与 query
+    # 完全无关的填充页（「意式咖啡豆 中深烘 拿铁」→ 法语「巴西米饭做法」；同 query 稳定复现；
+    # 随机参数 / no-cache 头 / 换 UA / 换 mkt 全部无效）→ 服务端反爬投毒，非缓存串号也非解析 bug。
+    # 假结果比无响应更毒（同 V2EX 教训）：标题与 query 无 ≥2 个 token 重合的条目一律剔除，
+    # 全被剔除则报 ⚠️ 而不是 ✅。
+    if rows:
+        toks = _query_tokens(Q)
+        if toks:
+            need = 2 if len(toks) >= 3 else 1
+            keep = [r for r in rows if sum(k in r[0].lower() for k in toks) >= need]
+            if not keep:
+                return ("ERR", f"返回 {len(rows)} 条但与查询完全无关（疑似反爬投毒：本机实测 "
+                               f"cn.bing 返回法语食谱/乌尔都语诗歌等填充页，同 query 稳定复现；"
+                               f"加随机参数 / no-cache / 换 UA 均无效）")
+            rows = keep
+    return rows
 
 def r_se():
     d = load_json("se.json")
