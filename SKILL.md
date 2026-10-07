@@ -135,6 +135,7 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | Exa | `EXA_API_KEY` | dashboard.exa.ai |
 | BrightData | `BRIGHTDATA_APITOKEN` | brightdata.com |
 | Firecrawl | `FIRECRAWL_API_KEY` | firecrawl.dev |
+| TinyFish | `TINYFISH_API_KEY` | agent.tinyfish.ai/api-keys（search/fetch_content $0/次；automation 才计费） |
 | Serper | `SERPER_API_KEY` | serper.dev |
 | 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
 | ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
@@ -143,7 +144,7 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：9 路免费并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：10 路并发（~5s）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/BrightData（~12s）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing,hn  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条
@@ -182,17 +183,30 @@ HTTP 200、结果页结构完好、`<h2><a>` 抓得到 10 条，但**内容与 q
   `⚠️ 结果与查询完全无关（疑似反爬投毒）`，不再打 ✅）。闸门只防伪不补能力 —— **bing 这一路视为常年不可用**。
 - 路由表内所有 `❌cn.bing（投毒）` 单元格一律不要走；中文/时效搜索压 LangSearch + 千帆 + BrightData。
 
+## TinyFish 双接入（2026-10-08 落地）
+
+TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混用**：
+
+| 层 | 入口 | 适用 | 费用 |
+|---|---|---|---|
+| d-reach 铺开 | `fanout.sh` 默认档 `tf` 通道（hosted MCP JSON-RPC + `X-API-Key`） | 多通道并行搜一遍，只要标题/URL/snippet | search $0/次 |
+| pi 原生 MCP | `mcp.json` 已注册 `tinyfish`（`https://agent.tinyfish.ai/mcp`，OAuth：`pi mcp auth tinyfish`），28 个工具 `mcp__tinyfish__*`（`search`/`fetch_content` 已提为 direct，其余 deferred 按需 `tool_search`） | 单点深取、页面监控（`create_monitor`/`run_monitor`）、web 自动化（`run_web_automation`）、browser 会话 | search/fetch $0；automation $0.016/step；monitor $0.005/run；browser $0.002/min |
+
+- 官方 5 个技能（`npm:@tiny-fish/pi` 包内）：`tinyfish-web`（选型路由）、`tinyfish-research`、`tinyfish-automation`、`tinyfish-authenticated`、`tinyfish-browser` —— pi 重启后进技能索引。
+- 两层共用同一把钥匙 `TINYFISH_API_KEY`（`~/.config/agents/env`，chmod 600）；MCP 走 OAuth 时不需要它，但 fanout 的 tf 通道必须要。
+- **fetch 选型铁律**：只读内容优先 `fetch_content`（免费、10 URL/次）；必须点击/填表/登录后才拿得到的数据才上 `run_web_automation`（按 step 计费）。
+
 ## 路由表
 
-> **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`**
+> **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`；⏱$0 = 需 Key 但按次免费（TinyFish：search / fetch_content 均 $0.00，不记账）**
 > 表内每行的 首选/备选/兜底 是**降级链**（首选挂了才走下一列），不是三选一；L2 起要多行同时开。
 > 完整国内通道实测清单（含不可达站点与替代链）见 **[references/cn-reach.md](references/cn-reach.md)**。
 
 | 意图 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
 | 中文搜索 | 百度千帆（自带计数器） | ❌cn.bing（投毒） | BrightData ⏱ |
-| 英文/技术搜索 | **LangSearch ⏱**（`count=20`，$0 全功能：时效/限域/全文；cn.bing 已投毒勿用） | Exa ⏱ | BrightData ⏱ |
-| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | ❌cn.bing（投毒） | BrightData `&tbs` ⏱ |
+| 英文/技术搜索 | **LangSearch ⏱**（`count=20`，$0 全功能：时效/限域/全文；cn.bing 已投毒勿用） | **TinyFish tf ⏱$0**（`domain_type`/`language`/`include_domains`/`purpose`） | Exa ⏱ |
+| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | **TinyFish tf ⏱$0**（`recency_minutes` 分钟级新鲜度 + `after/before_date`，禁与 date 混用） | BrightData `&tbs` ⏱ |
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | ❌cn.bing（投毒） |
 | 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | ❌cn.bing（投毒） |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
@@ -206,6 +220,7 @@ HTTP 200、结果页结构完好、`<h2><a>` 抓得到 10 条，但**内容与 q
 | 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 ✅免 | 百度千帆 | — |
 | 书影音评分 | 豆瓣 `window.__DATA__` ✅免 | 百度千帆 | — |
 | **普通网页/官方文档（不反爬）** | **直接 `curl` fetch ✅免**（JS 渲染站才用 `browser_use`） | Jina ⏱ | BrightData ⏱ |
+| JS 渲染/懒加载页抓取 | **TinyFish fetch_content ⏱$0**（真浏览器渲染，10 URL/次，`include/exclude_selectors` 裁边，`ttl` 控缓存） | BrightData ⏱ | Jina ⏱ |
 | 网页抓取（反爬） | BrightData ⏱ | Jina ⏱ | browser_use ⏱ |
 | 批量网页抓取 | BrightData（循环单抓，≤10）⏱ | Jina ⏱ | — |
 | GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Gitee ✅免 |
