@@ -16,9 +16,10 @@
 # 记账: 免费免 Key 通道不记账；deep 下 LangSearch/Exa/BrightData 调用前自动
 #       `quota.py use`，退出码 1（越免费线）→ 自动跳过该路并在输出里标注，
 #       不拖死其他路。百度千帆由它自己的计数器记账，这里不双扣。
+#       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   bing se hn jj oalex crossref segfault fcdev qianfan | deep: langsearch exa fcres bd
+#   bing se hn jj oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
@@ -71,6 +72,9 @@ gate() {
     LS_KEY=$(sh "$DIR/load_key.sh" LANGSEARCH_API_KEY https://langsearch.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "firecrawl" ]; then
     FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "tinyfish" ]; then
+    TF_KEY=$(sh "$DIR/load_key.sh" TINYFISH_API_KEY https://agent.tinyfish.ai/api-keys 2>/dev/null) || { echo "key" > "$TMP/skip.tinyfish"; return 1; }
+    return 0   # TinyFish search $0.00/次 → 不走 quota 记账
   elif [ "$svc" = "brightdata" ]; then
     BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   fi
@@ -134,6 +138,33 @@ f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
     sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' > "$TMP/qianfan.txt"
 }
 
+f_tf() {   # TinyFish Search（官方 hosted MCP，$0/次；JSON-RPC tools/call search）
+  gate tinyfish || return 0
+  TF_KEY="$TF_KEY" python3 - "$Q" > "$TMP/tf.json" 2>"$TMP/tf.err" <<'PYEOF'
+import json, os, sys, urllib.request
+
+q = sys.argv[1]
+key = os.environ["TF_KEY"]
+URL = "https://agent.tinyfish.ai/mcp"
+
+def rpc(payload):
+    h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+         "X-API-Key": key}
+    req = urllib.request.Request(URL, data=json.dumps(payload).encode(), headers=h)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8", "replace")
+
+rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+     "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                "clientInfo": {"name": "d-reach-fanout", "version": "1.0"}}})
+rpc({"jsonrpc": "2.0", "method": "notifications/initialized"})
+sys.stdout.write(rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+     "params": {"name": "search",
+                "arguments": {"query": q,
+                              "purpose": "d-reach parallel multi-channel web fanout"}}}))
+PYEOF
+}
+
 # ---------- deep 追加通道 ----------
 f_langsearch() {
   gate langsearch || return 0
@@ -177,7 +208,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fn="$1"; want "${fn#f_}" || return 0
   ( "$fn" ) & 
 }
-for fn in f_bing f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan; do launch "$fn"; done
+for fn in f_bing f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf; do launch "$fn"; done
 if [ "$DEEP" = 1 ]; then
   for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
@@ -385,6 +416,54 @@ def r_fcdev():
                     trunc(it.get("description") or it.get("snippet") or "", 100))
                    for it in items])
 
+def r_tf():
+    """TinyFish search：hosted MCP tools/call 的 JSON-RPC 响应。
+    hosted 返回可能是裸 JSON 或 SSE data: 行；results 可能在 structuredContent
+    或 content[0].text 内嵌 JSON 里，逐个兼容，最后 walk_generic 兜底。"""
+    t = load_text("tf.json")
+    if not t:
+        return None
+    r = None
+    if t.lstrip().startswith("{"):
+        r = json.loads(t)
+    else:
+        for line in t.splitlines():
+            if line.startswith("data:"):
+                d = line[5:].strip()
+                if d.startswith("{"):
+                    r = json.loads(d)
+                    break
+    if not isinstance(r, dict):
+        return None
+    if r.get("error"):
+        return ("ERR", "TinyFish API 错误：" + str(r["error"].get("message", r["error"]))[:120])
+    res = r.get("result") or {}
+    results = None
+    sc = res.get("structuredContent")
+    if isinstance(sc, dict):
+        results = sc.get("results") or sc.get("data")
+    if results is None:
+        for block in (res.get("content") or []):
+            txt = block.get("text") if isinstance(block, dict) else None
+            if not txt:
+                continue
+            try:
+                inner = json.loads(txt)
+            except Exception:
+                continue
+            results = inner.get("results") or inner.get("data")
+            if results is not None:
+                break
+    if results is None:
+        rows = rowify(walk_generic(res))
+    else:
+        rows = rowify([(it.get("title", ""), it.get("url", ""),
+                        trunc(it.get("snippet") or it.get("description") or "", 100))
+                       for it in results])
+    if not rows:
+        return ("ERR", "TinyFish 返回 0 条（凭据无效或限流时也会 0 条；看 tf.err）")
+    return rows
+
 def r_langsearch():
     d = load_json("langsearch.json")
     if d is None:
@@ -454,13 +533,14 @@ SECTIONS = [
     ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
+    ("tf",      "TinyFish Search（官方 hosted MCP，$0/次）", "需 TINYFISH_API_KEY", r_tf, False),
     ("langsearch", "LangSearch count=20（时效/限域，$0 全功能）", "按 token 计；已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不耗 credits；已 use", r_fcres, True),
     ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "firecrawl"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "firecrawl", "tf": "tinyfish"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
@@ -474,7 +554,9 @@ def http_code(key):
     t = load_text(key + ".http")
     return t.strip() if t else None
 
-print(f"## fanout「{Q}」— {'deep 深调研档（14 路）' if DEEP == '1' else '默认档（9 路免费）'}\n")
+_default_n = sum(1 for _s in SECTIONS if not _s[4])
+_label = (f"deep 深调研档（{len(SECTIONS)} 路）" if DEEP == "1" else f"默认档（{_default_n} 路）")
+print(f"## fanout「{Q}」— {_label}\n")
 total, okc, dead, zero = 0, 0, [], 0
 for key, name, note, fn, deep_only in SECTIONS:
     if ONLY and key not in ONLY:
