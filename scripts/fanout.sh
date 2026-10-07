@@ -147,21 +147,24 @@ q = sys.argv[1]
 key = os.environ["TF_KEY"]
 URL = "https://agent.tinyfish.ai/mcp"
 
-def rpc(payload):
+def rpc(payload, session=None):
     h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
          "X-API-Key": key}
+    if session:
+        h["Mcp-Session-Id"] = session
     req = urllib.request.Request(URL, data=json.dumps(payload).encode(), headers=h)
     with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode("utf-8", "replace")
+        # hosted 强制：initialize 响应头下发 mcp-session-id，后续请求必须回带
+        return r.headers.get("mcp-session-id"), r.read().decode("utf-8", "replace")
 
-rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+sid, _ = rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize",
      "params": {"protocolVersion": "2025-03-26", "capabilities": {},
                 "clientInfo": {"name": "d-reach-fanout", "version": "1.0"}}})
-rpc({"jsonrpc": "2.0", "method": "notifications/initialized"})
+rpc({"jsonrpc": "2.0", "method": "notifications/initialized"}, sid)
 sys.stdout.write(rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
      "params": {"name": "search",
                 "arguments": {"query": q,
-                              "purpose": "d-reach parallel multi-channel web fanout"}}}))
+                              "purpose": "d-reach parallel multi-channel web fanout"}}}, sid)[1])
 PYEOF
 }
 
