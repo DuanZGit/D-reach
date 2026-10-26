@@ -41,7 +41,21 @@ while [ $# -gt 0 ]; do
     --deep) DEEP=1 ;;
     --n) shift; N="${1:-5}" ;;
     --on) shift; ON="${1:-}" ;;
-    --list) sed -n 's/^#   \(.*\)$/\1/p' "$0" | tail -2; exit 0 ;;
+    --list) python3 - "$0" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding='utf-8').read()
+body = src.split('SECTIONS = [', 1)[1].split('\n]', 1)[0]
+for entry in re.split(r'\n(?=    \()', body):
+    m = re.match(r'\s*\("([a-z]+)",\s*"([^"]+)"', entry)
+    if not m:
+        continue
+    d = re.search(r',\s*(True|False)\s*\)', entry)
+    deep = bool(d and d.group(1) == 'True')
+    key, name = m.groups()
+    print(f"  {key:10s} {'deep' if deep else 'base':4s}  {name}")
+print("\n  用法: fanout.sh \"<query>\" [--deep] [--n N] [--on key1,key2]")
+PY
+      exit 0 ;;
     -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) [ -z "$Q" ] && Q="$1" ;;
   esac

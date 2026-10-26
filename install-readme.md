@@ -1,0 +1,160 @@
+# 安装 D-Reach
+
+D-Reach 是一个纯文本 + 两个小脚本的 Agent Skill：**没有密钥也能用**，装上就有一批免费免 Key 通道；
+想要更强的中文/学术/商业搜索，再按需填 key，功能逐级解锁。
+
+---
+
+## 1. 装到哪里
+
+Agent 读取技能的标准位置（二选一，装到 `~/.agents/skills` 最稳）：
+
+```bash
+mkdir -p ~/.agents/skills
+git clone https://github.com/DuanZGit/D-reach.git ~/.agents/skills/d-reach
+```
+
+Minis / 其它把技能放在 `/var/minis/skills` 的环境：
+
+```bash
+git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
+```
+
+`scripts/fanout.sh` 会自动探测这两个路径，装哪边都能跑。
+
+## 2. 系统依赖
+
+| 依赖 | 必需 | 用途 | 安装 |
+| --- | --- | --- | --- |
+| `bash` | 是 | 跑 `fanout.sh` | 系统自带 |
+| `curl` | 是 | 所有通道的 HTTP 请求 | 系统自带 |
+| `python3` ≥ 3.8 | 是 | `quota.py` 记账、解析 JSON | 系统自带 |
+| `gh` CLI | 否 | GitHub 仓库/代码搜索（`gh search`） | `brew install gh` / `apt install gh` |
+| `yt-dlp` | 否 | 视频字幕（B站/YouTube） | `pipx install yt-dlp` |
+| `bili` / `xhs` / `twitter-cli` | 否 | 社交平台登录态抓取 | 见 `references/social.md` |
+
+不需要 Node、不需要 npm 安装、不需要任何 Python 第三方包。
+
+## 3. 验证安装
+
+```bash
+cd ~/.agents/skills/d-reach
+bash scripts/fanout.sh --list          # 应列出所有通道名
+bash scripts/fanout.sh "测试查询"       # 默认档 9 路免费通道，约 5 秒
+python3 scripts/quota.py budget        # 看限额通道还剩多少
+```
+
+默认档里有 9 路**不需要任何 key**，所以第一次跑就该有结果。某几路显示 `🔇 未配置 key` 属于正常 —— 那是没填 key 的限额通道，被自动跳过。
+
+## 4. 密钥清单（按需填，全部可选）
+
+所有 key 走同一条查找链，**填一处即可**：
+
+```
+$环境变量  →  ~/.config/agents/env  →  <技能目录>/.env
+```
+
+推荐做法：
+
+```bash
+mkdir -p ~/.config
+touch ~/.config/agents/env && chmod 600 ~/.config/agents/env
+echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
+```
+
+缺失时脚本会在 stderr 打印「变量名 / 申请地址 / 写入方法 / 降级方案」四要素，Agent 会转述给你。
+
+### 4.1 限额通道（填了才解锁）
+
+| 变量名 | 服务 | 免费额度 | 不填的后果 | 申请 |
+| --- | --- | --- | --- | --- |
+| `LANGSEARCH_API_KEY` | LangSearch | 免费（RPS 5、按 token 计日额度） | 少一路中文长尾/限域搜索 | langsearch.com/dashboard |
+| `EXA_API_KEY` | Exa | 约 1000 次/月 | 缺语义搜索，官方文档/wiki 命中变差 | dashboard.exa.ai |
+| `FIRECRAWL_API_KEY` | Firecrawl | 1000 credits/月 | Research Index 不可用，只剩免 Key 的 Developer Index | firecrawl.dev |
+| `BRIGHTDATA_APITOKEN` | BrightData | 5000 次/月 | 反爬站点打不开，只能退回 Jina | brightdata.com |
+| `TINYFISH_API_KEY` | TinyFish | search/fetch **$0/次** | 少一路免计费搜索与网页抓取 | agent.tinyfish.ai/api-keys |
+| `SERPER_API_KEY` | Serper | 2500 次一次性 | 少一路 Google 结果 | serper.dev |
+| `SCRAPECREATORS_API_KEY` | ScrapeCreators | 有免费额度 | 小红书/TikTok/IG 结构化数据不可用 | scrapecreators.com |
+| `BAIDU_API_KEY` | 百度千帆 | 400 次/日 | 中文 AI 摘要线索缺失（另需装 `baiduaisearchwithquota` 技能，缺了自动跳过） | qianfan.console.baidu.com |
+| `JINA_API_KEY` | Jina Reader | 300 次/日（免 Key 限流更紧） | 网页正文提取更易被限流 | jina.ai |
+
+### 4.2 登录态（社交通道，不是普通 key）
+
+| 变量 / 文件 | 用途 | 拿法 |
+| --- | --- | --- |
+| `TWITTER_AUTH_TOKEN` + `TWITTER_CT0` | twitter-cli 读推文/搜索 | 浏览器登录后从 Cookie 取 `auth_token`、`ct0` |
+| `~/.bilibili-cli/credential.json` | B站登录态 | `bili login`，或按 `references/social.md` 手工写 |
+| `~/.xiaohongshu-cli/cookies.json` | 小红书登录态 | `xhs login`，cookie 约 30 天失效需重取 |
+
+### 4.3 官方 MCP 接入（Agent 支持 MCP 时首选）
+
+上面这些服务里，有一批**官方提供了 MCP server**。如果你的 Agent（pi / Claude Code / Codex / Cursor 等）支持 MCP，
+直接挂官方端点即可，不用自己写 HTTP 调用 —— 和本技能的 REST 通道**共用同一把 key**，两条路可以并存。
+
+| 服务 | 官方托管端点 | 认证 | 本地 stdio 方式 | 关键工具 |
+| --- | --- | --- | --- | --- |
+| Exa | `https://mcp.exa.ai/mcp` | 免 key（限速）/ OAuth 用 `?login` / header `x-api-key` | `npx -y exa-mcp-server` + `EXA_API_KEY` | `web_search_exa`、`web_fetch_exa`、`web_search_advanced_exa`、`agent_run` |
+| Firecrawl | `https://mcp.firecrawl.dev/v2/mcp`（Bearer key）<br>`https://mcp.firecrawl.dev/v2/mcp-oauth`（OAuth，无需 key） | `Authorization: Bearer $FIRECRAWL_API_KEY` 或浏览器 OAuth | 见官方 `mcp-server/local` 文档 | Search、Scrape、Parse |
+| TinyFish | `https://agent.tinyfish.ai/mcp` | OAuth（`pi mcp auth tinyfish`）或 `X-API-Key` header | — | search、fetch_content、monitor、run_web_automation |
+| BrightData | 官方 Remote MCP（用 API token 认证，见 docs `/products/mcp-server/remote/quickstart`） | `API_TOKEN` | `npx @brightdata/mcp` + `API_TOKEN` | 搜索、抓取、结构化数据等 |
+| Jina | `https://mcp.jina.ai/v1` | header `Authorization: Bearer $JINA_API_KEY`（可省略，限额更紧） | `npx -y mcp-remote https://mcp.jina.ai/v1` | `read_url`、`search_web`、`search_arxiv`、`extract_pdf`、`capture_screenshot_url` |
+| LangSearch | `https://mcp.langsearch.com/`（Streamable HTTP） | LangSearch API key | — | 网页搜索、全文/片段（同 REST 能力） |
+| DeepWiki | `https://mcp.deepwiki.com/mcp` | **免 key** | — | `ask_wiki_question`、`read_wiki_contents`、`read_wiki_structure` |
+
+客户端配置样例（支持标准 `mcpServers` 的客户端通用）：
+
+```json
+{
+  "mcpServers": {
+    "exa": { "url": "https://mcp.exa.ai/mcp" },
+    "deepwiki": { "url": "https://mcp.deepwiki.com/mcp" },
+    "jina": {
+      "url": "https://mcp.jina.ai/v1",
+      "headers": { "Authorization": "Bearer ${JINA_API_KEY}" }
+    },
+    "brightdata": {
+      "command": "npx",
+      "args": ["-y", "@brightdata/mcp"],
+      "env": { "API_TOKEN": "${BRIGHTDATA_APITOKEN}" }
+    }
+  }
+}
+```
+
+几点说明：
+
+- **免 key 也能连**的只有 Exa（限速档）和 DeepWiki，其余官方 MCP 都要 key（同一把，不用申请两次）。
+- **Serper 没有官方 MCP**（GitHub 上只有社区包 `mcp-server-serper` / `serper-mcp-server`），要接就自己评估第三方实现。
+- MCP 走的是各服务自己的配额，本技能 `quota.py` 只管 REST 调用；走 MCP 时不记账，别以为「没记账 = 随便用」。
+- 不适合挂 MCP 的客户端（纯 HTTP 环境）照旧用 REST + `scripts/load_key.sh`，能力一样。
+
+### 4.4 完全不需要 key 的通道（装机即用，深挖主力）
+
+`cn.bing`、Firecrawl Developer Index、StackExchange、HN Algolia、掘金、SegmentFault、
+OpenAlex、Crossref、GitHub（`gh` 登录即可）、DeepWiki、yt-dlp。
+
+这些通道**不限量、不记账**，L2 起步就该一次铺满 —— 闲置才是浪费。
+
+## 5. 30 秒上手
+
+```bash
+cd ~/.agents/skills/d-reach
+
+# 默认档：9 路免费通道并发（约 5s）
+bash scripts/fanout.sh "ollama vs vllm"
+
+# 深调研：追加 4 路限额通道（约 12s，自动记账）
+bash scripts/fanout.sh "ollama vs vllm" --deep
+
+# 只看某几路
+bash scripts/fanout.sh "关键词" --on bing,hn,oalex
+```
+
+调用细节、定档规则（L1/L2/L3）、各平台命令都在 [`SKILL.md`](SKILL.md)，
+按场景的示例见 [`references/`](references/)。
+
+## 6. 安全约定
+
+- 仓库**不含任何密钥**；key 只存在你自己的 `~/.config/agents/env` 或技能目录 `.env`（已被 `.gitignore` 排除）。
+- 不要把 `env` / `cookies.json` / `credential.json` 提交到任何仓库。
+- `scripts/load_key.sh` 只输出 key 值给调用方，永不打印到终端。

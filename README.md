@@ -9,6 +9,17 @@ gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browse
 代码只有两个小件：`scripts/quota.py`（约 200 行）记免费额度防越线，
 `scripts/fanout.sh`（一条命令并发铺开 9 路免费 + `--deep` 4 路限额通道）。
 
+## 安装
+
+```bash
+mkdir -p ~/.agents/skills
+git clone https://github.com/DuanZGit/D-reach.git ~/.agents/skills/d-reach
+bash ~/.agents/skills/d-reach/scripts/fanout.sh --list
+```
+
+系统依赖（bash / curl / python3）、按需填的密钥清单、哪些通道完全免 key、
+哪些服务提供**官方 MCP 接入** —— 全部见 [install-readme.md](install-readme.md)。
+
 ## 用法
 
 ```bash
@@ -58,20 +69,24 @@ bash scripts/fanout.sh "ollama vs vllm" --deep
 
 ## 环境变量
 
+全部 optional，路径与申请入口见 [install-readme.md](install-readme.md#4-密钥清单按需填全部可选)。核心四个：
+
 | 变量 | 用途 |
 | --- | --- |
 | `BRIGHTDATA_APITOKEN` | BrightData REST（5,000 次/月） |
 | `EXA_API_KEY` | Exa 搜索 |
 | `FIRECRAWL_API_KEY` | Firecrawl Research Index / 提高 Developer Index 限流 |
 | `LANGSEARCH_API_KEY` | LangSearch Web Search（langsearch.com/dashboard） |
-| `TWITTER_AUTH_TOKEN` / `TWITTER_CT0` | twitter-cli 登录态 |
+
+社交通道另外需要 `TWITTER_AUTH_TOKEN` / `TWITTER_CT0`，以及 bili / xhs 的登录态文件。
 
 ## 安全
 
-- 密钥一律走环境变量（`$$VARNAME`），不硬编码、不写进 markdown。
-- `secrets.enc` 是**已加密**的凭据包（AES-256-CBC + PBKDF2 600k），含 API key 与
-  bilibili / xhs cookie；密码不入库，丢失不可恢复。加解密方式见 [`SECRETS.md`](SECRETS.md)。
-- `secrets.json`（明文）已被 `.gitignore` 排除。若仓库转公开，**必须先删 `secrets.enc` 并清历史**。
+- 密钥一律走环境变量或 `~/.config/agents/env`，不硬编码、不写进 markdown。
+- **本仓库不携带任何凭据**。key 只存在用户本机（`~/.config/agents/env` 或技能目录 `.env`，后者已在 `.gitignore` 内）。
+- `scripts/load_key.sh` 是取 key 的统一入口：查找链 `$环境变量 → ~/.config/agents/env → <技能目录>/.env`，
+  找不到时在 stderr 打印「变量名 / 申请地址 / 写入方法 / 降级方案」，从不 echo 值。
+- 社交通道用登录态文件（`~/.bilibili-cli/credential.json`、`~/.xiaohongshu-cli/cookies.json`），同样不入库。
 
 ## 说明
 
