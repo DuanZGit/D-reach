@@ -20,6 +20,11 @@ license: MIT
 metadata:
   openclaw:
     homepage: https://github.com/DuanZGit/D-reach
+upstream:
+  repo: https://github.com/DuanZGit/D-reach
+  path: .
+  pin: e1f58fc
+
 ---
 
 > **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
