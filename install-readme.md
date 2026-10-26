@@ -40,11 +40,12 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 ```bash
 cd ~/.agents/skills/d-reach
 bash scripts/fanout.sh --list          # 应列出所有通道名
-bash scripts/fanout.sh "测试查询"       # 默认档 9 路免费通道，约 5 秒
+bash scripts/fanout.sh "测试查询"       # 默认档 10 路，约 5 秒
 python3 scripts/quota.py budget        # 看限额通道还剩多少
 ```
 
-默认档里有 9 路**不需要任何 key**，所以第一次跑就该有结果。某几路显示 `🔇 未配置 key` 属于正常 —— 那是没填 key 的限额通道，被自动跳过。
+默认档 10 路里有 8 路**完全不需要 key**（cn.bing 已判死、Crossref 遇中文自动跳过），所以第一次跑就该有结果。
+显示 `🔇 未配置 key` 属于正常 —— 千帆要装另一个技能、TinyFish 要 key，缺了自动跳过。
 
 ## 4. 密钥清单（按需填，全部可选）
 
@@ -66,17 +67,20 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 
 ### 4.1 限额通道（填了才解锁）
 
+> 数字口径：**2026-10-26 对官方定价页核实**。厂商改政策频繁，长期用之前自己再核一次。
+
 | 变量名 | 服务 | 免费额度 | 不填的后果 | 申请 |
 | --- | --- | --- | --- | --- |
-| `LANGSEARCH_API_KEY` | LangSearch | 免费（RPS 5、按 token 计日额度） | 少一路中文长尾/限域搜索 | langsearch.com/dashboard |
-| `EXA_API_KEY` | Exa | 约 1000 次/月 | 缺语义搜索，官方文档/wiki 命中变差 | dashboard.exa.ai |
-| `FIRECRAWL_API_KEY` | Firecrawl | 1000 credits/月 | Research Index 不可用，只剩免 Key 的 Developer Index | firecrawl.dev |
-| `BRIGHTDATA_APITOKEN` | BrightData | 5000 次/月 | 反爬站点打不开，只能退回 Jina | brightdata.com |
-| `TINYFISH_API_KEY` | TinyFish | search/fetch **$0/次** | 少一路免计费搜索与网页抓取 | agent.tinyfish.ai/api-keys |
-| `SERPER_API_KEY` | Serper | 2500 次一次性 | 少一路 Google 结果 | serper.dev |
-| `SCRAPECREATORS_API_KEY` | ScrapeCreators | 有免费额度 | 小红书/TikTok/IG 结构化数据不可用 | scrapecreators.com |
-| `BAIDU_API_KEY` | 百度千帆 | 400 次/日 | 中文 AI 摘要线索缺失（另需装 `baiduaisearchwithquota` 技能，缺了自动跳过） | qianfan.console.baidu.com |
-| `JINA_API_KEY` | Jina Reader | 300 次/日（免 Key 限流更紧） | 网页正文提取更易被限流 | jina.ai |
+| `LANGSEARCH_API_KEY` | LangSearch | 每日 token 额度（官方不给固定请求数；00:00 UTC 重置，起始 5 RPS） | 少一路中文长尾/限域搜索 | langsearch.com/dashboard |
+| `EXA_API_KEY` | Exa | $10 余额/月 ≈ 2,500 次 Lite search（每月 1 日重置） | 缺语义搜索，官方文档/wiki 命中变差 | dashboard.exa.ai |
+| `FIRECRAWL_API_KEY` | Firecrawl | 1,000 credits/月（约 500 次 search 或 1,000 页；不结转）<br>**论文端点免费，不耗 credits** | Research Index 不可用，只剩免 Key 的 Developer Index | firecrawl.dev |
+| `BRIGHTDATA_APITOKEN` | BrightData | 5,000 requests/月 | 反爬站点打不开，只能退回 Jina | brightdata.com |
+| `TINYFISH_API_KEY` | TinyFish | **search / fetch $0/次**（30 搜/分、150 抓/分；automation $0.016/步） | 少一路免计费搜索与网页抓取 | agent.tinyfish.ai/api-keys |
+| `BAIDU_API_KEY` | 百度千帆 | 搜索类 400 次/日（总量，5 个搜索 API 共享） | 中文 AI 摘要线索缺失（由另一个技能 `baiduaisearchwithquota` 使用，缺了自动跳过） | qianfan.console.baidu.com |
+| `JINA_API_KEY` | Jina Reader（**仅手打时用**，fanout 不读） | 免 key 约 20 RPM；有 key 约 200 RPM（按 token 计） | 手打 `curl r.jina.ai` 时更易被限流 | jina.ai |
+
+> `SERPER_API_KEY` / `SCRAPECREATORS_API_KEY` 已从本表移除：当前 `fanout.sh` 与 `quota.py` 里**没有任何代码读它们**（早前版本留的残影）。
+> 需要这两家的能力时按 `references/` 里的 REST 示例手打，并自己把 key 写进 env。
 
 ### 4.2 登录态（社交通道，不是普通 key）
 
@@ -140,7 +144,7 @@ OpenAlex、Crossref、GitHub（`gh` 登录即可）、DeepWiki、yt-dlp。
 ```bash
 cd ~/.agents/skills/d-reach
 
-# 默认档：9 路免费通道并发（约 5s）
+# 默认档：10 路并发（8 路完全免 key，约 5s）
 bash scripts/fanout.sh "ollama vs vllm"
 
 # 深调研：追加 4 路限额通道（约 12s，自动记账）

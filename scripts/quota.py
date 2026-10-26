@@ -14,8 +14,11 @@
   D_REACH_QUOTA_FILE   计数文件路径（默认 ~/.agent-reach/quota.json；仅测试时覆盖）
 
 百度千帆不在此记账 —— 由 baiduaisearchwithquota 自己的计数器负责。
-免 Key 不限量通道（cn.bing / StackExchange / HN / OpenAlex / Crossref / 掘金 / gh …）不记账。
+Firecrawl Research Index（论文端点）官方明确免费，本技能也不记账。
+免 Key 不限量通道（Firecrawl Dev Index / TinyFish / StackExchange / HN / OpenAlex / Crossref / 掘金 / gh …）不记账。
 """
+import contextlib
+import fcntl
 import json
 import os
 import sys
@@ -31,21 +34,24 @@ except ValueError:
 RESERVE = min(max(RESERVE, 0.0), 0.9)
 
 # 服务: (月上限, 日上限)；None = 该项不限
+# 数字口径：2026-10-26 重新对官方定价页核实，改数字先回头对一次账。
 LIMITS = {
-    "brightdata":  (5000, None),   # 免费 5000/月
-    "exa":         (1000, 50),     # 新账号约 1000/月，日线防单日打爆
-    "firecrawl":   (1000, 200),    # Free plan 1000 credits/月
-    "langsearch":  (None, 50),     # 官方无请求日配额（RPS5/TPM/TPD 全 token 计，值见 Dashboard）；50=本技能自设保守线
-    "jina_reader": (None, 300),    # 免费但限流
+    "brightdata":  (5000, None),    # MCP/Unlocker Free Tier: 5,000 requests/月（官方 pricing/mcp-server）
+    "exa":         (2500, 50),      # 免费余额 $10/月，约合 2,500 次 Lite search（官方 pricing，每月 1 号重置）
+    "firecrawl":   (1000, 200),      # Free plan: 1,000 credits/月，每月重置、不结转（官方 pricing）；论文端点免费不计这里
+    "langsearch":  (None, 50),      # 官方只给“daily token 额度”（00:00 UTC 重置、起始 5 RPS），无明确请求数；50=本技能自设保守线
+    "jina_reader": (None, 300),      # 免 key 约 20 RPM（按 IP 限速），有 key 提到约 200 RPM；300/日 = 自设保守线
     "browser_use": (None, 100),    # Minis 内置
     "xhs":         (None, 200),    # 登录态免费，防风控
     "bili":        (None, 200),
     "twitter":     (None, 100),
 }
 # 不限量、不记账的免 Key 通道（写在这里只为 budget 里提醒，别去 use 它们）
-FREE_CHANNELS = ("cn.bing", "StackExchange", "HN Algolia", "OpenAlex", "Crossref",
-                 "掘金", "博客园/SegmentFault", "36氪/InfoQ/澎湃/界面", "豆瓣",
-                 "gh CLI", "DeepWiki", "V2EX")
+# 2026-10-26 校正：剔除已投毒的 cn.bing、搜索已退役的 V2EX、已退役的博客园，
+# 补上一直在用却没列进来的 Firecrawl Developer Index 与 TinyFish（$0/次）。
+FREE_CHANNELS = ("Firecrawl Developer Index", "TinyFish search/fetch", "StackExchange",
+                 "HN Algolia", "OpenAlex", "Crossref", "掘金", "SegmentFault",
+                 "36氪/InfoQ/澎湃/界面", "豆瓣", "gh CLI", "DeepWiki")
 
 
 def _soft(limit):
@@ -69,6 +75,19 @@ def _load():
 def _save(d):
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.write_text(json.dumps(d, indent=2))
+
+
+@contextlib.contextmanager
+def _locked():
+    """跨进程互斥：fanout.sh 会并行调多路 use，无锁会丢失更新。"""
+    FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = FILE.with_suffix(FILE.suffix + ".lock")
+    with open(lock_path, "a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def _bucket(d, svc):
@@ -167,34 +186,35 @@ def _budget(d):
 
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
-    d = _load()
-    if cmd == "status":
-        print(json.dumps(_status(d), indent=2, ensure_ascii=False))
-        return 0
-    if cmd == "budget":
-        print(_budget(d))
-        return 0
-    if cmd in ("use", "check"):
-        svc = argv[2] if len(argv) > 2 else ""
-        if not svc:
-            print("usage: quota.py use|check <service> [count]")
-            return 2
-        try:
-            n = int(argv[3]) if len(argv) > 3 else 1
-        except ValueError:
-            print(f"count 必须是整数：{argv[3]!r}")
-            return 2
-        code, msg = _try(d, svc, n, cmd == "use")
-        print(msg)
-        return code
-    if cmd == "reset":
-        svc = argv[2] if len(argv) > 2 else None
-        if svc:
-            d.pop(svc, None)
-        else:
-            for k in LIMITS:
-                d.pop(k, None)
-        _save(d)
+    with _locked():
+        d = _load()
+        if cmd == "status":
+            print(json.dumps(_status(d), indent=2, ensure_ascii=False))
+            return 0
+        if cmd == "budget":
+            print(_budget(d))
+            return 0
+        if cmd in ("use", "check"):
+            svc = argv[2] if len(argv) > 2 else ""
+            if not svc:
+                print("usage: quota.py use|check <service> [count]")
+                return 2
+            try:
+                n = int(argv[3]) if len(argv) > 3 else 1
+            except ValueError:
+                print(f"count 必须是整数：{argv[3]!r}")
+                return 2
+            code, msg = _try(d, svc, n, cmd == "use")
+            print(msg)
+            return code
+        if cmd == "reset":
+            svc = argv[2] if len(argv) > 2 else None
+            if svc:
+                d.pop(svc, None)
+            else:
+                for k in LIMITS:
+                    d.pop(k, None)
+            _save(d)
         print(f"reset {svc if svc else 'all'}")
         return 0
     print(f"unknown command: {cmd}")

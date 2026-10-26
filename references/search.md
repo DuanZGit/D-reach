@@ -14,7 +14,7 @@
 > 本节保留是因为它解释**每一轮在干嘛**——fanout 只把「铺开」这一个动作自动化了。
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：9 路免费并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：10 路并发（~5s）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep    # L3：+LangSearch/Exa/FC-Research/BrightData
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing   # L1：单路点查，再配一手源
 ```
@@ -31,11 +31,11 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 
 | 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 9 路） |
+| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 10 路） |
 | 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补反向体验 | Jina 读官方文档原文；`<候选> vs`、`<候选> 问题`、`<候选> 替代` |
 
 只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 默认档
-那 9 路全免费，`--deep` 的 4 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
+默认档 10 路里 8 路完全免 key，`--deep` 的 4 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
 
 **L3 深调研**（10 来源 / 3 轮 / 必含反证）
 
@@ -72,7 +72,7 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 c2 第一轮用了 9 个词，LangSearch 返回维基泛条目 + Google CAPTCHA 页，Crossref 跑去匹配"配置"字样
 返回「水质监测站 / 变电站」；第二轮换成 4 个词（`mihomo wireguard 出站 配置 persistent-keepalive`），
 Exa 立刻命中 mihomo 官方 wiki 和三个真实 issue。
-**做法**：给 LangSearch/Exa 的 query 压在 **4–6 个词**，长尾限定词交给 cn.bing 站内（`site:`）和
+**做法**：给 LangSearch/Exa 的 query 压在 **4–6 个词**，长尾限定词交给 LangSearch `includeDomains` 和
 Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Crossref 已被 fanout 自动跳过。
 
 **反证独立走一轮**（L3 必做）：`<主题> 缺点` / `失败` / `不推荐` / `争议` / `vs 替代品`，
@@ -81,12 +81,12 @@ Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Cro
 ## 免费通道铺开清单（不限量，深挖主力）
 
 > **别逐条手打** —— 这些里能一起铺的已经被 `fanout.sh` 默认档一次并发打完了
-> （cn.bing / FirecrawlDev / StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref /
-> 千帆共 9 路）。下表留作「fanout 没覆盖到的场景」查漏。
+> （千帆 / FirecrawlDev / StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / TinyFish
+> 共 10 路；cn.bing 已判死但仍在默认档里做探针）。下表留作「fanout 没覆盖到的场景」查漏。
 
 | 场景 | 通道 | 命中数（L2 建议） | fanout 覆盖？ |
 |---|---|---|---|
-| 英文/技术 | cn.bing | 2-4 | ✅ 默认档 |
+| 英文/技术 | LangSearch ⏱ / TinyFish | 2-5 | ✅ 默认档（cn.bing 已判死，仅留探针） |
 | 报错/排障 | StackExchange `search/advanced?q=` | 1-2 | ✅ 默认档 |
 | 深度讨论 | HN Algolia | 1-2 | ✅ 默认档 |
 | 学术 | OpenAlex → Crossref | 1-2 各 | ✅ 默认档 |
@@ -101,22 +101,22 @@ Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Cro
 
 > `--deep` 追加的 LangSearch / Exa / Firecrawl-Research / BrightData-Google 是限额/计 token 通道，
 > 脚本会自动 `quota.py use`；这些通道 **不要 `quota.py use` 之外再手动 use**（会双扣）。
-> deep 四路的月余量实测 >96%（LangSearch 本月 0 次、Exa 3/1000、Firecrawl 1/1000、BrightData 163/5000）——
+> deep 四路的月余量实测 >96%（2026-10-26 复核；具体数字以 `python3 scripts/quota.py budget` 为准，不抄快照）——
 > **L3 无条件铺，不必省**。
 
 ## 搜索路由（速查，完整见 SKILL.md）
 
 | 场景 | 首选 | 备选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆（`smart_search.py search`，生成式答案） | cn.bing 站内 | BrightData REST |
-| 英文/技术搜索 | **cn.bing ✅免 + LangSearch ⏱ 双发**（`count=20`） | Exa REST ⏱ | BrightData REST（Google） |
-| 时效/限域检索 | LangSearch REST ⏱（freshness + include/excludeDomains） | cn.bing 站内 ✅免 | BrightData `&tbs` ⏱ |
-| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | cn.bing 站内 |
-| 中文技术长尾 | **掘金 API / 博客园 / SegmentFault** ✅免 | 百度千帆 | cn.bing |
+| 中文搜索 | 百度千帆（`smart_search.py search`，生成式答案） | TinyFish search | BrightData REST |
+| 英文/技术搜索 | **LangSearch ⏱（`count=20`）+ TinyFish search（$0/次）双发** | Exa REST ⏱ | BrightData REST（Google） |
+| 时效/限域检索 | LangSearch REST ⏱（freshness + include/excludeDomains） | TinyFish（recency_minutes / after-before_date） | BrightData `&tbs` ⏱ |
+| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | BrightData ⏱ |
+| 中文技术长尾 | **掘金 API / SegmentFault** ✅免 | 百度千帆 | BrightData ⏱ |
 | 编程问题/README/Issue/PR | Firecrawl Developer Index ✅免 | Exa | GitHub |
 | 学术论文 | **OpenAlex / Crossref** ✅免 | Firecrawl Research Index ✅免 | Semantic Scholar ✅免 |
-| 公司/专有名词背景 | 百度百科（千帆） | cn.bing 站内 ✅免 | BrightData ⏱ |
-| 深度技术讨论 | **HN Algolia** ✅免 | V2EX | cn.bing |
+| 公司/专有名词背景 | 百度百科（千帆百科星图） | Exa ⏱ | BrightData ⏱ |
+| 深度技术讨论 | **HN Algolia** ✅免 | 掘金 / SegmentFault ✅免 | BrightData ⏱ |
 | 特定网页阅读 | Jina Reader (`curl r.jina.ai/URL`) | BrightData REST | browser_use |
 | 批量网页抓取 | BrightData REST 循环 | Jina 循环 | - |
 | 需要登录/交互的站点 | browser_use | BrightData REST | - |
@@ -166,7 +166,8 @@ curl -s "https://api.firecrawl.dev/v2/search/developer?query=%E4%BD%A0%E7%9A%84%
 
 ## Firecrawl Research Index（学术论文，⭐ 免费但需 key）
 
-论文检索索引，覆盖 **41M+ 生命科学 + AI/ML 论文**。FAQ 明确 **paper endpoints 免费，不耗 credits**。
+论文检索索引，覆盖 **41M+ 生命科学 + AI/ML 论文**。官方 Billing FAQ 原文：
+“The Firecrawl Research Index paper endpoints are free across every category”，即 **paper 端点全免费、不耗 credits**。
 
 | 特性 | 值 |
 |------|-----|
@@ -192,8 +193,9 @@ curl -s -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
 ```bash
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
 
-# 必应中国 —— 英文/技术搜索首选（中文几乎不出结果，别用）
-curl -s -A "$UA" "https://cn.bing.com/search?q=alpine+proot+x86+emulation"
+# cn.bing 已判死（2026-09 起疑似投毒：返回与 query 无关的填充页）→ 不要再手打这条
+# 英文/技术搜索改用 TinyFish（免计费）：
+#   curl -s https://agent.tinyfish.ai/mcp ...（见 SKILL.md 的 tf 通道）或用 fanout.sh
 
 # StackExchange / StackOverflow —— 报错排障第一源，带 score/is_answered
 #   坑：q 只在 /search/advanced 生效，/search 只吃 intitle（写错 → 400）
@@ -215,7 +217,7 @@ curl -s "https://api.crossref.org/works?query=deepseek&rows=5&select=title,DOI,U
 
 | 通道 | 覆盖 | 不适合 |
 |------|------|--------|
-| cn.bing | 英文技术、长尾网页 | 中文查询（h2≈1，几乎无结果） |
+| cn.bing ❌已弃用 | （历史：英文技术尚可） | 现在全场景不可信：疑投毒，结果与 query 无关 |
 | StackExchange | 编程报错、工具用法 | 中文问题、时效资讯 |
 | HN Algolia | 技术趋势、一手吐槽 | 中文内容 |
 | 掘金 | 中文技术实践、踩坑 | 学术、英文一手源 |

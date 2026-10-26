@@ -80,7 +80,11 @@ CH="$TMP/chans"; mkdir -p "$CH"
 # 返回 0=可跑；1=越免费线(跳过)；key 缺失也返回 1 并写原因
 gate() {
   svc="$1"
-  if [ "$svc" = "exa" ]; then
+  if [ "$svc" = "fcres" ]; then
+    # Firecrawl Research Index 论文端点官方免费 → 只验 key，不记账（2026-10-26 对定价页核实）
+    FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+    return 0
+  elif [ "$svc" = "exa" ]; then
     EXA_KEY=$(sh "$DIR/load_key.sh" EXA_API_KEY https://dashboard.exa.ai 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "langsearch" ]; then
     LS_KEY=$(sh "$DIR/load_key.sh" LANGSEARCH_API_KEY https://langsearch.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
@@ -92,7 +96,10 @@ gate() {
   elif [ "$svc" = "brightdata" ]; then
     BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   fi
-  if ! python3 "$QUOTA" use "$svc" >/dev/null 2>&1; then
+  python3 "$QUOTA" use "$svc" >/dev/null 2>&1; _qrc=$?
+  # 0=正常，2=已过裕度线（仍可跑）；1=越免费线 → 跳过
+  # 旧版把 2 也当失败，结果越接近裕度线可用通道越少，跟裕度线本意相反。
+  if [ "$_qrc" = "1" ]; then
     echo "quota" > "$TMP/skip.$svc"; return 1
   fi
   return 0
@@ -147,7 +154,7 @@ f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
     --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" 2>/dev/null
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
-  [ -d "$BAIDU" ] || { echo "[fanout] 千帆技能目录缺失" > "$TMP/qianfan.txt"; return; }
+  [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆技能目录缺失（$BAIDU）" > "$TMP/qianfan.txt"; return; }
   timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" 2>&1 |
     sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' > "$TMP/qianfan.txt"
 }
@@ -198,7 +205,7 @@ f_exa() {
     -o "$TMP/exa.json" -w '%{http_code}' > "$TMP/exa.http" 2>/dev/null
 }
 f_fcres() {
-  gate firecrawl || return 0
+  gate fcres || return 0
   curl -s --max-time 20 -H "Authorization: Bearer $FC_KEY" -G \
     "https://api.firecrawl.dev/v2/search/research/papers" \
     --data-urlencode "query=$Q" --data-urlencode "k=5" \
@@ -218,7 +225,7 @@ f_bd() {
 #   · V2EX /search?q= —— 302 → /go/search，返回「搜索引擎技术研究」节点帖子，与 query 无关
 #     （会给假结果；假结果比无响应更毒，故整路移除）
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
-#   中文社区长尾现在靠 掘金 + SegmentFault + cn.bing 站内；知乎 403、微博需登录 → 走千帆快照。
+#   中文社区长尾现在靠 掘金 + SegmentFault；cn.bing 已投毒、知乎 403、微博需登录 → 走千帆快照。
 
 # ---------- 并发发射 ----------
 launch() {   # $1 = 函数名；失败不拖垮整体
@@ -551,13 +558,13 @@ SECTIONS = [
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
     ("tf",      "TinyFish Search（官方 hosted MCP，$0/次）", "需 TINYFISH_API_KEY", r_tf, False),
-    ("langsearch", "LangSearch count=20（时效/限域，$0 全功能）", "按 token 计；已 quota.py use", r_langsearch, True),
+    ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
-    ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不耗 credits；已 use", r_fcres, True),
+    ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
     ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "firecrawl", "tf": "tinyfish"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
@@ -592,6 +599,12 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "cjk":
         print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
               f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
+        dead.append(name)
+        continue
+    if skip == "err":
+        # 依赖脚本缺失/报错：绝不能把错误文本当答案渲染出来
+        detail = load_text(key + ".txt") or ""
+        print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
         dead.append(name)
         continue
     try:
