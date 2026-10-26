@@ -21,9 +21,10 @@ secrets.json
 d-reach-secrets*
 *.pw
 
-# Local key loader (本机取 Key 入口，永不入库)
-scripts/load_key.sh
 
 # Python cache
 __pycache__/
 *.pyc
+
+# Encrypted credential bundle (never ship in a public repo)
+secrets.enc
