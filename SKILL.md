@@ -4,7 +4,7 @@ description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
   GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、BrightData、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
-  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满 9 路免费免 Key 通道（~5s）；
+  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 10 路（~5s）；
   L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
@@ -37,8 +37,8 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：14 条路里 9 路免费不限量、4 路限额通道月余量 >96%（LangSearch 本月 0 次、
-> Exa 3/1000、Firecrawl 1/1000、BrightData 163/5000）—— **不铺开不是省钱，是把信息漏掉**。
+> 理由很直白：14 条路里 10 路走默认档（8 路完全免 key、2 路需 key 但 $0/次或自带免费额度）、4 路限额通道月余量 >96%
+> —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on bing,<最相关一路>`）。
 
 把"用户想找信息"翻译成"用哪个通道、怎么调用"。**路由表由你（agent）直接执行**，
@@ -48,7 +48,7 @@ upstream:
 
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
-   L2 起一律走它：**默认 9 路免费免 Key 并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
+   L2 起一律走它：**默认档 10 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
    Firecrawl-Research / BrightData-Google（约 10-15s）。**别一条一条串行试** ——
    实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
    L1 点查可只跑两路互证：`fanout.sh "<query>" --on bing,<最相关一路>`
@@ -66,9 +66,8 @@ upstream:
 
 ## 调研强度（默认 L2）
 
-> 定档依据来自实测（2026-09-25）：d-reach 是低频技能，而限额通道余量极度富余 ——
-> BrightData 163/5000、Exa 3/1000、Firecrawl 1/1000、**LangSearch 本月 0 次**、
-> 千帆搜索类 19/350、千帆百科星图/识图/秒懂/Query改写 0/310。
+> 定档依据来自低频使用实况（2026-09-25 首次勘测，2026-10-26 复核）：d-reach 是低频技能，而限额通道余量极度富余 ——
+> 实际用量随时变，开工前跑一条 `python3 scripts/quota.py budget` 看当下裕度，别信文档里的快照数字。
 > **浅搜才是真正的浪费**：单次做深、一次搜透，比来回补搜省总 token。
 
 | 档 | 什么时候用 | 最小独立来源 | 轮次 | 硬要求 |
@@ -105,7 +104,7 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSe
 术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
 再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
 
-**免费优先**：`fanout.sh` 默认档一次并发 **9 路**免费免 Key 通道（cn.bing⚠️已投毒 / Firecrawl Developer /
+**免费优先**：`fanout.sh` 默认档一次并发 **10 路**（cn.bing⚠️已判死 / Firecrawl Developer /
 StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆）—— 它们不限量、不记账，
 **闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research / BrightData 是限额/计 token 通道，
 **L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
@@ -140,16 +139,16 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | Exa | `EXA_API_KEY` | dashboard.exa.ai |
 | BrightData | `BRIGHTDATA_APITOKEN` | brightdata.com |
 | Firecrawl | `FIRECRAWL_API_KEY` | firecrawl.dev |
-| TinyFish | `TINYFISH_API_KEY` | agent.tinyfish.ai/api-keys（search/fetch_content $0/次；automation 才计费） |
-| Serper | `SERPER_API_KEY` | serper.dev |
+| TinyFish | `TINYFISH_API_KEY` | agent.tinyfish.ai/api-keys（search/fetch **$0/次**，30 搜/150 抓每分钟） |
+| Serper（**仅手打，fanout 不读**） | `SERPER_API_KEY` | serper.dev |
 | 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
-| ScrapeCreators | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
+| ScrapeCreators（**仅手打，fanout 不读**） | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
 | LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
 
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：10 路并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：10 路并发（~5s，8 路免 key）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/BrightData（~12s）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing,hn  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条
@@ -215,7 +214,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 | 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | ❌cn.bing（投毒） |
 | 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | ❌cn.bing（投毒） |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
-| 学术论文 | **OpenAlex / Crossref ✅免 + Firecrawl Research ⏱**（L3 无条件铺，它免 credits 只要 key） | Semantic Scholar ✅免 | Jina 读原文 ⏱ |
+| 学术论文 | **OpenAlex / Crossref ✅免 + Firecrawl Research ✅免**（官方：论文端点不耗 credits，只要 key） | Semantic Scholar ✅免 | Jina 读原文 ⏱ |
 | 公司/专有名词背景 | **千帆百科星图**（`dispatch knowledge` 200/日）+ 百度百科词条 | ❌cn.bing（投毒） | Exa ⏱ |
 | 图片/截图找来源 | 千帆相似图搜索（100/日） | 千帆智能识图（100/日） | ❌cn.bing（投毒） |
 | 概念科普补全 | 千帆秒懂百科（100/日，短视频脚本式讲解） | 百度百科词条 | —
@@ -371,8 +370,9 @@ python3 $SKILLS/d-reach/scripts/quota.py reset brightdata
 | 1 | 越免费线（**不记账**） | 立刻换备选 / 免费通道 |
 
 **留 30% 裕度**：日线和月线都按 70% 设线，剩下 30% 留给当天突发任务。
-免费免 Key 通道（cn.bing⚠️已投毒 / StackExchange / HN / OpenAlex / Crossref / 掘金 / 博客园 /
-36氪 / 豆瓣 / gh CLI / DeepWiki / V2EX）**不限量、不记账 → 深挖时优先铺满它们**，
+免费通道（Firecrawl Developer / TinyFish / StackExchange / HN / OpenAlex / Crossref / 掘金 /
+SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 深挖时优先铺满它们**；
+已除名：cn.bing（投毒）、V2EX 搜索（退役）、博客园（退役）。
 这才是「用足日额度」的正确姿势。
 
 计数文件 `~/.agent-reach/quota.json`，跨日/跨月自动归零。

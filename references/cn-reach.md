@@ -10,7 +10,7 @@
 |------|------|----------|
 | `export.arxiv.org` / `arxiv.org` | 000 连接超时（-4 强制 IPv4 同样 000） | Firecrawl Research Index / OpenAlex / Crossref |
 | `zh.wikipedia.org` | 000（只解析出 IPv6 `2001::1`） | 百度百科（千帆）/ 中文维基镜像 |
-| `html.duckduckgo.com` | 000 | **cn.bing.com**（英文）/ 百度千帆（中文） |
+| `html.duckduckgo.com` | 000 | LangSearch / TinyFish search |
 | `scholar.google.com` | 000 | 百度学术 / OpenAlex / Crossref / ncpssd |
 | `www.researchgate.net` | 403 | OpenAlex（元数据全覆盖，无反爬） |
 | `tieba.baidu.com` | 403（WebView UA 被拦） | browser_use 走交互 |
@@ -27,22 +27,21 @@
 
 ## 🟢 通用搜索（免 Key）
 
+> **cn.bing 已弃用（2026-09-22 起疑似投毒）**：中文查询几乎不出结果，英文查询会返回与 query 无关的伪装结果。
+> 历史记录：2026-09-11 它确实好用（英文 4 条干净结果，`<h2><a href>` 直出），之后退化。
+> `fanout.sh` 的 `r_bing` 已加相关性闸门拦伪装结果，**但不要把这一路当可用通道**；它已从 `quota.py` 的免 Key 通道列表剔除。
+> 不保留抽取正则 —— 留着只会让人重试一条已死的路。
+
 ```bash
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
-
-# 必应中国 —— ✅ 英文/技术查询实测返回 4 条干净结果（<h2><a href> 直出，无需解跳转）
-curl -s -A "$UA" "https://cn.bing.com/search?q=alpine+proot+x86+emulation"
-# 抽结果（URL 可直接取，不像 360 那样套 link 跳转）
-#   grep -oE '<h2[^>]*><a[^>]*href="[^"]+"[^>]*>.*?</a>'
-# ⚠️ 中文查询实测几乎不出结果（h2 计数 =1）→ 中文一律回百度千帆，别在这硬耗
 
 # 360 搜索 —— ✅ 可达，但结果是 /link?m=... 跳转串，要先解跳转才能拿真 URL
 curl -s -A "$UA" "https://www.so.com/s?q=关键词"
 #   grep -oE '<h3[^>]*class="res-title[^>]*>.{0,120}'
 ```
 
-**结论**：搜英文技术用 **cn.bing.com + LangSearch 双发**（LangSearch `count=20` 一次顶 cn.bing 5-10 倍信息量，
-且 $0 全功能）；搜中文用 **百度千帆**（400/日）；都不够再上 BrightData 打 Google（记得带 `format` 字段，漏了返 400）。
+**结论**：搜英文技术用 **LangSearch（`count=20`）+ TinyFish search（$0/次）**；搜中文用 **百度千帆**（400/日）；
+都不够再上 BrightData 打 Google（记得带 `format` 字段，漏了返 400）。
 时效/限域另有 **LangSearch**（`api.langsearch.com` 本机实测 200/1.5s，2026-09-22）——全功能免费（仅 daily token 额度），
 `freshness` + `include/excludeDomains` + `count=50` 是强项，英文与站内限定检索**优先它**；中文相关性一般，仍回千帆。
 > 2026-09-25 起这些都交给 `scripts/fanout.sh` 一条命令并发铺开，不用再手打。
@@ -113,7 +112,7 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 |------|------|------|
 | 小红书 `xhs` CLI | ✅ 已登录 | `xhs search` / `xhs comments`（消费决策主力，见 SKILL 铁律） |
 | B站 `bili` CLI | ✅ | 字幕 + AI 总结 + 评论（见 SKILL 铁律） |
-| V2EX | ❌ **搜索已退役**（2026-09-25：`/search?q=` 302→`/go/search`，返回「搜索引擎技术研究」节点帖子、与 query 无关 → 会给**假结果**） | 换 cn.bing 站内 `site:v2ex.com` 或掘金/SegmentFault |
+| V2EX | ❌ **搜索已退役**（2026-09-25：`/search?q=` 302→`/go/search`，返回「搜索引擎技术研究」节点帖子、与 query 无关 → 会给**假结果**） | 掘金 / SegmentFault |
 | 豆瓣 | ✅ `search.douban.com/book/subject_search?search_text=X`，结果在 `window.__DATA__` JSON | 书/影/音评分与短评 |
 | 微博 | 302（需登录） | browser_use |
 | 知乎 | 403（web + api 均被拦） | browser_use 交互，或千帆搜知乎快照 |
@@ -133,11 +132,11 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 ## 路由优先级（国内环境）
 
 ```
-中文搜索      → 百度千帆(400/日)          → cn.bing（弱） → BrightData Google（带 format 字段）
-英文技术      → cn.bing + LangSearch 双发   → Exa           → BrightData Google
+中文搜索      → 百度千帆(400/日)          → TinyFish search      → BrightData Google（带 format 字段）
+英文技术      → LangSearch + TinyFish 双发 → Exa                   → BrightData Google
 代码报错      → StackExchange API         → Firecrawl Dev Index（免 key）→ Fanout 默认档
-中文技术长尾  → 掘金 API + SegmentFault    → cn.bing 站内（博客园/V2EX 已退役）
-深度讨论      → HN Algolia                → cn.bing 站内 site:v2ex.com
+中文技术长尾  → 掘金 API + SegmentFault    → 百度千帆（博客园/V2EX 已退役）
+深度讨论      → HN Algolia                → 掘金 / SegmentFault
 公司/人物/产品 → 千帆百科星图(knowledge)   → 百度百科词条  → Exa
 学术          → OpenAlex → Crossref       → Firecrawl Research（arXiv 不可达）
 A股公告       → 巨潮资讯 cninfo           → 东方财富
@@ -146,7 +145,7 @@ A股公告       → 巨潮资讯 cninfo           → 东方财富
 强反爬        → BrightData → Jina         → browser_use
 ```
 
-> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 9 路 + `--deep` 4 路）
+> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 10 路 + `--deep` 4 路）
 > 一次并发打完，**别逐条手 curl** —— 实测 3 路串行 2.95s vs 并行 1.30s。
 
 > **记账规则**：本文件所有通道 **免 Key 且不限量 → 不执行 `quota.py use`**。
