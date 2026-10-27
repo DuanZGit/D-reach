@@ -95,15 +95,18 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 上面这些服务里，有一批**官方提供了 MCP server**。如果你的 Agent（pi / Claude Code / Codex / Cursor 等）支持 MCP，
 直接挂官方端点即可，不用自己写 HTTP 调用 —— 和本技能的 REST 通道**共用同一把 key**，两条路可以并存。
 
-| 服务 | 官方托管端点 | 认证 | 本地 stdio 方式 | 关键工具 |
-| --- | --- | --- | --- | --- |
-| Exa | `https://mcp.exa.ai/mcp` | 免 key（限速）/ OAuth 用 `?login` / header `x-api-key` | `npx -y exa-mcp-server` + `EXA_API_KEY` | `web_search_exa`、`web_fetch_exa`、`web_search_advanced_exa`、`agent_run` |
-| Firecrawl | `https://mcp.firecrawl.dev/v2/mcp`（Bearer key）<br>`https://mcp.firecrawl.dev/v2/mcp-oauth`（OAuth，无需 key） | `Authorization: Bearer $FIRECRAWL_API_KEY` 或浏览器 OAuth | 见官方 `mcp-server/local` 文档 | Search、Scrape、Parse |
-| TinyFish | `https://agent.tinyfish.ai/mcp` | OAuth（`pi mcp auth tinyfish`）或 `X-API-Key` header | — | search、fetch_content、monitor、run_web_automation |
-| BrightData | 官方 Remote MCP（用 API token 认证，见 docs `/products/mcp-server/remote/quickstart`） | `API_TOKEN` | `npx @brightdata/mcp` + `API_TOKEN` | 搜索、抓取、结构化数据等 |
-| Jina | `https://mcp.jina.ai/v1` | header `Authorization: Bearer $JINA_API_KEY`（可省略，限额更紧） | `npx -y mcp-remote https://mcp.jina.ai/v1` | `read_url`、`search_web`、`search_arxiv`、`extract_pdf`、`capture_screenshot_url` |
-| LangSearch | `https://mcp.langsearch.com/`（Streamable HTTP） | LangSearch API key | — | 网页搜索、全文/片段（同 REST 能力） |
-| DeepWiki | `https://mcp.deepwiki.com/mcp` | **免 key** | — | `ask_wiki_question`、`read_wiki_contents`、`read_wiki_structure` |
+| 服务 | 官方托管端点 | 认证 | 本地 stdio 方式 | 关键工具 | 本机状态 |
+| --- | --- | --- | --- | --- | --- |
+| Exa | `https://mcp.exa.ai/mcp` | 免 key（限速）/ OAuth 用 `?login` / header `x-api-key` | `npx -y exa-mcp-server` + `EXA_API_KEY` | `web_search_exa`、`web_fetch_exa`（实测 2 个） | 未挂 |
+| Firecrawl | `https://mcp.firecrawl.dev/v2/mcp`（Bearer key）<br>`https://mcp.firecrawl.dev/v2/mcp-oauth`（OAuth，无需 key） | `Authorization: Bearer $FIRECRAWL_API_KEY` 或浏览器 OAuth | 见官方 `mcp-server/local` 文档 | 31 个（`firecrawl_search`/`scrape`/`map`…） | 未挂 |
+| TinyFish | `https://agent.tinyfish.ai/mcp` | OAuth（`pi mcp auth tinyfish`）或 `X-API-Key` header | — | search、fetch_content、monitor、run_web_automation | **已挂** |
+| BrightData | `https://mcp.brightdata.com/mcp?token=<token>`（SSE 版：`/sse?token=`） | token 直接放 query | `npx @brightdata/mcp` + `API_TOKEN` | 31 个（`search_engine`/`scrape_as_markdown`…） | 未挂 |
+| Jina | `https://mcp.jina.ai/v1` | header `Authorization: Bearer $JINA_API_KEY`（可省略，限额更紧） | `npx -y mcp-remote https://mcp.jina.ai/v1` | 12 个（`read_url`/`search_web`/`search_arxiv`/`extract_pdf`） | 未挂 |
+| LangSearch | `https://mcp.langsearch.com/mcp`（Streamable HTTP，**路径必须带 `/mcp`**） | `Authorization: Bearer <LangSearch API key>` | — | 1 个（`web_search`） | 未挂 |
+| DeepWiki | `https://mcp.deepwiki.com/mcp` | **免 key** | — | `ask_wiki_question`、`read_wiki_contents`、`read_wiki_structure` | **已挂** |
+
+> 上表的端点、工具数都是 2026-10-26 用本机 key 实测 `tools/list` 拿到的，不是抄文档。
+> 需要带 session 的（BrightData / TinyFish）先 `initialize` 拿 `Mcp-Session-Id`，后续请求要带上，否则 400。
 
 客户端配置样例（支持标准 `mcpServers` 的客户端通用）：
 
