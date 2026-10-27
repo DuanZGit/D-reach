@@ -63,6 +63,21 @@ PY
 done
 if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans]"; exit 2; fi
 
+# --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
+if [ -n "$ON" ]; then
+  KNOWN="qianfan bing fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd"
+  _bad=""
+  for _c in $(echo "$ON" | tr ',' ' '); do
+    case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
+  done
+  if [ -n "$_bad" ]; then
+    echo "[fanout] 未知通道:$_bad" >&2
+    echo "[fanout] 可用: $KNOWN" >&2
+    exit 2
+  fi
+fi
+case "$N" in ''|*[!0-9]*) echo "[fanout] --n 必须是正整数" >&2; exit 2 ;; esac
+
 # --on 里点名了 deep 专属通道 → 自动按 deep 跑（省得再写一遍 --deep）
 case ",$ON," in
   *,langsearch,*|*,exa,*|*,fcres,*|*,bd,*) DEEP=1 ;;
@@ -218,7 +233,7 @@ f_bd() {
   #    稳定的一路，一次超时就把整轮从 ~12s 拖到 50s+。要么快回，要么让位。
   curl -s --max-time 25 -X POST "https://api.brightdata.com/request" \
     -H "Authorization: Bearer $BD_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys,urllib.parse;print(json.dumps({"zone":"mcp_unlocker","format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
+    -d "$(python3 -c 'import json,sys,os,urllib.parse;print(json.dumps({"zone":os.environ.get("BRIGHTDATA_ZONE","mcp_unlocker"),"format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
     -o "$TMP/bd.json" -w '%{http_code}' > "$TMP/bd.http" 2>/dev/null
 }
 # 已退役通道（2026-09-25 实测，别往回加）：
