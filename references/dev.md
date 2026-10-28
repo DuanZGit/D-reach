@@ -40,26 +40,8 @@ gh issue list -R owner/repo --json number,title --jq '.[] | "\(.number): \(.titl
 gh run view <run-id> --repo owner/repo --log-failed  # 只看失败日志
 ```
 
-- 读单个文件用 `gh api .../contents/...`（返回 base64，要 `base64 -d`）；
-  问架构/实现原理走 DeepWiki，别 clone。
+- 读单个文件用 `gh api .../contents/...`（返回 base64，要 `base64 -d`）。
+  问架构/实现原理：`gh` 读 README + `gh api .../contents/<path>` 组合，别整仓 clone。
 - 认证状态：`gh auth status`。私有仓库 push 注意全局 `insteadOf` 会把 github.com
   重写到只读镜像，需临时 unset。
 
-## DeepWiki（MCP，已注册）
-
-问 GitHub 仓库的架构 / 用法 / 实现原理。**工具清单和参数以自描述为准**，不要照抄本文档：
-
-```bash
-minis-mcp-cli tools deepwiki                       # 看有哪些工具 + 入参 schema
-minis-mcp-cli call deepwiki ask_question --input '{"repoName":"owner/repo","question":"这个仓库的并发模型是怎么实现的？"}'
-```
-
-- 参数名是 **`repoName`**（不是 `repo`），实测 2026-09-05；接受 `owner/repo` 字符串或最多 10 个的数组。
-- 另有 `read_wiki_structure`（目录树）、`read_wiki_contents`（全文）两个工具。
-- 未索引的仓库直接回 `Repository not found`（私有仓库默认没索引）→ 立刻降级 `gh`，不要重试。
-  但 **`fetch failed` / `not available (last failed Ns ago)` 是另一回事**：pi 的 MCP 客户端有 ~15s 失败退避缓存，
-  `connect` 报这类错常常是上一轮的瞬时抖动被缓存住了（2026-09-22 实测：DeepWiki 被判死 → 等待后重连即通，
-  端点 `mcp.deepwiki.com/mcp` 全程 200），**隔一会儿重试即可，别当场判通道死了**。
-- **不要传 `https://github.com/...` 全 URL**（会被拒）。
-- 返回的是已索引的文档摘要（顶部有 `Last indexed:` 日期），不是实时文件列表；
-  要精确文件内容 / 最新 commit → `gh api`。

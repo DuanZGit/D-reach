@@ -3,7 +3,7 @@
 搜索 / 爬取 / 网页读取 / 社交媒体 / 代码仓库 / 视频字幕的统一路由（Agent Skill）。
 
 **通道**：百度千帆、Exa、LangSearch、BrightData、Firecrawl（Developer / Research Index）、Jina Reader、
-gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browser_use。
+gh CLI、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli。
 
 **设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
 代码只有两个小件：`scripts/quota.py`（约 200 行）记免费额度防越线，
@@ -72,7 +72,7 @@ BrightData 需要 token 有 account 读权限，Exa / Jina / LangSearch 没有�
 | Jina Reader | 免 key 约 20 RPM；有 key 约 200 RPM（按 token 计） | 分钟级 | BrightData |
 | TinyFish search / fetch | **$0/次**（30 搜/分、150 抓/分） | 分钟级 | — |
 | Serper | 2,500 次（**一次性，不重置**） | 不重置 | 换 Exa / LangSearch |
-| gh / yt-dlp / DeepWiki / StackExchange / HN / OpenAlex / Crossref / 掘金 / SegmentFault | 免费无限 | — | — |
+| gh / yt-dlp / StackExchange / HN / OpenAlex / Crossref / 掘金 / SegmentFault | 免费无限 | — | — |
 
 **30% 裕度**：日线与月线都按上限的 70% 设线（`D_REACH_RESERVE` 可调），过线只提示不阻断；
 剩下 30% 留给突发任务。免 Key 不限量通道不记账 —— 它们才是深挖的主力。
