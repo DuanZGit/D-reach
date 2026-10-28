@@ -27,6 +27,9 @@ upstream:
 
 ---
 
+> **pi 用户**：本技能另有一个插件版（`pi-extension/d-reach.ts`），把检索做成原生工具 `d_reach`，
+> 带 quick/base/deep 三档。装了插件时优先用工具，不必读本文件；没装就用下面的命令。
+>
 > **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
 > `SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills`
 > （UG/本机命中 `~/.agents/skills`，Minis 命中 `/var/minis/skills`。）

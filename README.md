@@ -56,6 +56,24 @@ bash scripts/fanout.sh "ollama vs vllm" --deep
 不拖慢本轮）。可查的只有 Firecrawl（`/v2/team/credit-usage`）和 TinyFish（MCP `get_wallet`）；
 BrightData 需要 token 有 account 读权限，Exa / Jina / LangSearch 没有公开额度接口 —— 这些继续用本地计数兜底。
 
+## pi 插件版（与 skill 并行）
+
+`pi-extension/d-reach.ts` 把同一套通道做成 **pi 原生工具**，不替代 skill —— skill 给任何 harness 用，
+插件让 pi 不必先读 SKILL.md 就能直接调。
+
+```bash
+ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
+```
+
+| 入口 | 作用 |
+| --- | --- |
+| 工具 `d_reach` | 参数 `query` + `profile`(quick/base/deep) + `channels`；返回精简摘要，完整结果写 `~/.agent-reach/last-run.md` |
+| 工具 `d_reach_state` | 通道健康（连败/最后成功）+ 限额通道已用/官方剩余 |
+| 命令 `/reach` `/reach-deep` | 交互式跑一轮，结果只弹通知 |
+
+**profile 就是分级路由**：`quick` 只打 3 路互补通道（千帆 + Firecrawl Dev + TinyFish，约 5s），
+`base` 9 路，`deep` 13 路含限额通道。点查用 quick，调研用 base/deep，别一律铺满。
+
 ## 免费额度一览
 
 > 数字口径：**2026-10-26 对官方定价页核实**。厂商改政策频繁，长期使用前建议自己再核一次。
