@@ -566,11 +566,13 @@ const SOCIAL = {
 		hint: "bilibili auth login start（扫码）",
 	},
 	xhs: {
+		// 用回 xiaohongshu-cli（纯 HTTP + cookie）：xhs-cli 逆向版连 search 都要
+		// 下载 200MB 的 camoufox，反而不如旧包轻
 		bin: "xhs",
-		whoami: ["xhs", "status"],
+		whoami: ["xhs", "whoami"],
 		search: (q: string, _n: number) => ["xhs", "search", q, "--json"],
-		authFile: join(homedir(), ".config", "xhs-cli"),
-		hint: "xhs login（扫码）",
+		authFile: join(homedir(), ".xiaohongshu-cli", "cookies.json"),
+		hint: "浏览器取 a1 + web_session 写进 ~/.xiaohongshu-cli/cookies.json",
 	},
 } as const;
 
