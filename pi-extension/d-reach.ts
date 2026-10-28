@@ -546,20 +546,31 @@ export default function dReachExtension(pi: ExtensionAPI) {
  * 但原始报错对模型毫无指导意义。所以这里先 whoami 探活，再决定能不能搜，
  * 失败时直接给「去哪刷新」而不是把 CLI 错误原样抛回去。
  */
+/** 三家 CLI 的登录态判定各写各的：老 bili 用 ok:true，bilibili 用 logged_in，
+ *  xhs-cli 未登录时直接 exit 1 + 文案。统一按输出内容判，不按退出码。 */
+function judgeAuth(out: string): "ok" | "expired" | null {
+	if (/not_authenticated|Not logged in|"logged_in"\s*:\s*false/i.test(out)) return "expired";
+	if (/"logged_in"\s*:\s*true/i.test(out)) return "ok";
+	if (/ok:\s*true/.test(out) && !/logged_in/.test(out)) return "ok";
+	return null;
+}
+
 const SOCIAL = {
 	bili: {
-		bin: "bili",
-		whoami: ["bili", "whoami"],
-		search: (q: string, n: number) => ["bili", "search", q, "--type", "video", "-n", String(n), "--json"],
-		authFile: join(homedir(), ".bilibili-cli", "credential.json"),
-		hint: "bili login（扫码）或按 references/social.md 手工写 credential.json",
+		bin: "bilibili",
+		whoami: ["bilibili", "auth", "status", "--json"],
+		search: (q: string, n: number) => [
+			"bilibili", "video", "search", "--keyword", q, "--num", String(n), "--json",
+		],
+		authFile: join(homedir(), ".config", "bilibili-skill"),
+		hint: "bilibili auth login start（扫码）",
 	},
 	xhs: {
 		bin: "xhs",
-		whoami: ["xhs", "whoami"],
-		search: (q: string, n: number) => ["xhs", "search", q, "-n", String(n), "--json"],
-		authFile: join(homedir(), ".xiaohongshu-cli", "cookies.json"),
-		hint: "xhs login 重新扫码；cookie 约 30 天失效",
+		whoami: ["xhs", "status"],
+		search: (q: string, _n: number) => ["xhs", "search", q, "--json"],
+		authFile: join(homedir(), ".config", "xhs-cli"),
+		hint: "xhs login（扫码）",
 	},
 } as const;
 
@@ -583,38 +594,37 @@ async function probeSocial(p: SocialPlatform) {
 		/* 文件不存在也算信息 */
 	}
 
+	let out = "";
 	try {
-		const { stdout } = await run(meta.whoami[0], meta.whoami.slice(1), { timeout: 25_000 });
-		const authed = /ok:\s*true/.test(stdout) && !/not_authenticated/.test(stdout);
-		return {
-			platform: p,
-			state: authed ? ("ok" as const) : ("expired" as const),
-			authFileAge,
-			detail: authed ? "登录态有效" : "登录态失效（not_authenticated）",
-		};
+		const r = await run(meta.whoami[0], meta.whoami.slice(1), { timeout: 25_000 });
+		out = r.stdout + r.stderr;
 	} catch (e) {
-		// CLI 在未登录时通常用非 0 退出码，真因在 stdout 里，别把 "Command failed" 当结论
-		const out = String((e as { stdout?: string })?.stdout ?? "");
-		if (/not_authenticated/.test(out)) {
-			return { platform: p, state: "expired" as const, authFileAge, detail: "登录态失效（not_authenticated）" };
-		}
-		if (/ok:\s*true/.test(out)) {
-			return { platform: p, state: "ok" as const, authFileAge, detail: "登录态有效" };
-		}
+		// 未登录时通常非 0 退出码，真因在 stdout/stderr 里，别把 "Command failed" 当结论
+		out = String((e as { stdout?: string; stderr?: string })?.stdout ?? "") +
+			String((e as { stderr?: string })?.stderr ?? "");
+	}
+	const verdict = judgeAuth(out);
+	if (verdict) {
 		return {
 			platform: p,
-			state: "error" as const,
+			state: verdict === "ok" ? ("ok" as const) : ("expired" as const),
 			authFileAge,
-			detail: `探活失败：${e instanceof Error ? e.message.slice(0, 60) : "未知"}`,
+			detail: verdict === "ok" ? "登录态有效" : "登录态失效",
 		};
 	}
+	return {
+		platform: p,
+		state: "error" as const,
+		authFileAge,
+		detail: `探活无结论：${out.trim().slice(0, 80) || "无输出"}`,
+	};
 }
 
 const socialTool = defineTool({
 	name: "d_reach_social",
 	label: "d-reach 社交平台",
 	description:
-		"B站 / 小红书 的登录态体检与内容搜索。不传 platform 只看状态（哪些能用、cookie 多久没刷新）；" +
+		"B站 / 小红书 的登录态体检与内容搜索（B站用 bilibili 2.x，小红书用 xhs-cli 逆向 API 版）。不传 platform 只看状态；" +
 		"传 platform + query 才真的搜。登录态失效时会直接告诉你该跑哪条命令，不会把 CLI 原始报错丢回来。" +
 		"Twitter/X 目前本机没装 CLI，返回缺失。",
 	parameters: Type.Object({
@@ -645,8 +655,10 @@ const socialTool = defineTool({
 			return { content: [{ type: "text", text: lines.join("\n") }], details: { probes } };
 		}
 
+		// 搜索不强制登录态：B 站公开内容免登录，小红书未登录会让 CLI 自己报错，
+		// 由下面 catch 翻译。登录态只影响「能不能拿到个人数据/字幕」。
 		const target = probes.find((p) => p.platform === params.platform);
-		if (!target || target.state !== "ok") {
+		if (!target) {
 			return {
 				content: [
 					{

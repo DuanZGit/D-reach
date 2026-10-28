@@ -359,12 +359,15 @@ gh search repos "query" --sort stars --limit 10
 ## B站 / 小红书 铁律（踩过的坑，别再来一遍）
 
 ```bash
-bili search "query" --type video -n 5
-bili video <bvid> -s --yaml        # 字幕
-bili video <bvid> --ai             # AI 总结
-bili video <bvid> -c --yaml        # 评论（字段是 message）
+# B站：2026-10-28 换到 @yukariyukaro/bilibili-cli 2.x（Node，分组命令，旧平铺语法不兼容）
+bilibili video search --keyword "query" --num 5 --json
+bilibili video subtitle --bvid BV1xx411c7xx     # 字幕（需登录）
+bilibili video summary  --bvid BV1xx411c7xx     # B站官方 AI 总结
+bilibili video hot --json                        # 热门（免登录）
+bilibili auth status --json / auth login start   # 登录态 / 扫码登录
+# 旧的 Python bili 0.6.2 仍在（有 6 月登录态），需要个人数据时可回退：bili whoami
 
-xhs search "关键词" --json         # note_id / xsec_token 在 item 顶层！
+xhs search "关键词" --json         # 2026-10-28 换到 xhs-cli（逆向 API 版，更快、风控略差）
 xhs comments <note_id> --xsec-token <token> --all --yaml
 ```
 
