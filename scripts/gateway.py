@@ -45,7 +45,7 @@ NO_KEY_PAGE = """<!doctype html><meta charset="utf-8"><title>需要访问 key</t
      或在能登录的终端跑 <code>cat ~/.agent-reach/gateway.key</code> 取。</p>
 </div></body>"""
 
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>d-reach</title>
@@ -69,7 +69,8 @@ PAGE = """<!doctype html>
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);
-    font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+    font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;
+    overflow-x:hidden;max-width:100%}
   .wrap{max-width:1240px;margin:0 auto;padding:22px 20px 48px}
 
   .topbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
@@ -84,7 +85,7 @@ PAGE = """<!doctype html>
 
   /* ---- 主卡片：照 magpie 的 .rt ---- */
   .rt{background:var(--card);border:1px solid var(--line);border-radius:14px;
-      padding:14px 16px 12px;margin:0 0 16px;box-shadow:var(--card-edge)}
+      padding:14px 16px 12px;margin:0 0 16px;box-shadow:var(--card-edge);overflow:hidden}
   .rt-top{display:flex;flex-direction:column;gap:3px}
   .rt-what{font-size:13px;color:var(--muted);margin:0}
   .rt-what b{color:var(--fg);font-weight:600}
@@ -125,7 +126,8 @@ PAGE = """<!doctype html>
   .rt-accts li .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rt-accts li .nm small{color:var(--muted);font-size:11.5px;margin-left:6px}
   .rt-accts li .right{text-align:right;font-size:11.5px;color:var(--muted);
-    font-variant-numeric:tabular-nums;white-space:nowrap}
+    font-variant-numeric:tabular-nums;white-space:nowrap;max-width:46%;
+    overflow:hidden;text-overflow:ellipsis}
   .rt-accts li .bar{grid-column:2 / -1;height:3px;background:var(--line-2);border-radius:99px;overflow:hidden}
   .rt-accts li .bar>i{display:block;height:100%;background:var(--green);width:0}
   .rt-accts li .bar>i.warn{background:var(--amber)}
@@ -165,33 +167,60 @@ PAGE = """<!doctype html>
 
   /* ---- 来源明细 ---- */
   .src{background:var(--card);border:1px solid var(--line);border-radius:14px;
-    padding:4px 16px 10px;box-shadow:var(--card-edge)}
-  .src summary{cursor:pointer;font-size:12.5px;color:var(--fg-2);padding:10px 0;
+    padding:2px 16px 6px;box-shadow:var(--card-edge)}
+  .src summary{cursor:pointer;font-size:12.5px;color:var(--fg-2);padding:11px 0;
     list-style:none;display:flex;align-items:center;gap:8px}
   .src summary::-webkit-details-marker{display:none}
   .src summary::before{content:"›";color:var(--faint);transition:transform var(--morph-t) var(--morph-ease)}
   .src[open] summary::before{transform:rotate(90deg)}
-  .src h4{font-size:12.5px;margin:12px 0 4px;color:var(--fg)}
-  .src ul{margin:4px 0 8px;padding-left:18px;font-size:12.5px;color:var(--fg-2)}
-  .src li{margin:2px 0}
-  .src a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line-2)}
-  .src a:hover{border-bottom-color:var(--fg-2)}
-  .src .note{color:var(--muted);font-size:11.5px}
-  .src .warn{color:var(--amber)}
-  .src .bad{color:var(--red)}
-  .src .sum{border-top:1px solid var(--line);margin-top:10px;padding-top:8px;font-size:12.5px;color:var(--fg)}
+  .src summary .cnt{color:var(--muted);font-size:11.5px;margin-left:auto;
+    font-variant-numeric:tabular-nums}
+
+  .grp{padding:12px 0 10px;border-top:1px solid var(--line)}
+  .grp:first-of-type{border-top:none}
+  .grp h5{font-size:12.5px;margin:0;font-weight:600;color:var(--fg);
+    display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .grp h5 i{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+  .grp.ok h5 i{background:var(--green)}
+  .grp.bad h5 i{background:var(--red)}
+  .grp h5 .cnt{font-weight:400;color:var(--muted);font-size:11.5px;margin-left:auto;
+    font-variant-numeric:tabular-nums}
+  .grp .note{color:var(--muted);font-size:11.5px;margin-top:3px;line-height:1.5}
+  .grp ul{margin:7px 0 0;padding:0;list-style:none;display:grid;gap:5px}
+  .grp li{font-size:12.5px;line-height:1.5;color:var(--fg-2);padding-left:13px;position:relative}
+  .grp li::before{content:"";position:absolute;left:2px;top:.62em;width:4px;height:4px;
+    border-radius:50%;background:var(--line-2)}
+  .grp li a{color:var(--fg);text-decoration:none;border-bottom:1px solid transparent}
+  .grp li a:hover{border-bottom-color:var(--fg-2)}
+  .grp li .meta{color:var(--muted);font-size:11.5px;margin-left:4px}
+  .grp .txt{margin:7px 0 0;font-size:12.5px;line-height:1.65;color:var(--fg-2);
+    white-space:pre-wrap;max-height:260px;overflow:auto}
+  .grp details{margin-top:6px}
+  .grp details summary{font-size:11.5px;color:var(--muted);padding:2px 0}
 
   @media(max-width:860px){
     .wrap{padding:14px 12px 36px}
     .rt{padding:12px 12px 10px}
-    .rt-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px;row-gap:12px;padding:14px 0}
-    .rt-accts{grid-column:1 / -1;max-height:none}
+    /* 单列：两个节点横排一行，通道列表整行在下，连线直接关掉 */
+    .rt-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:10px;
+      row-gap:10px;padding:14px 0}
+    .rt-stage .rt-node{padding:9px 6px 8px}
+    .rt-stage .rt-node b{font-size:12px}
+    .rt-stage .rt-node small{font-size:10.5px}
+    .rt-stage .rt-node .glyph{font-size:17px;margin-bottom:1px}
+    .rt-accts{grid-column:1 / -1;max-height:none;width:100%}
     .rt-wires{display:none}
     .rt-foot{gap:12px}
     .stats{gap:18px}
     .stats b{font-size:20px}
-    .rt-accts li{grid-template-columns:10px minmax(0,1fr);row-gap:4px}
-    .rt-accts li .right{grid-column:2;text-align:left;padding-bottom:2px}
+    .rt-accts li{grid-template-columns:10px minmax(0,1fr) auto;column-gap:8px;padding:8px 10px}
+    .rt-accts li .right{max-width:42%}
+    .rt-accts li .bar{grid-column:2 / -1}
+    .bar2 input{flex:1 1 100%;min-width:0}
+    .bar2 select,.bar2 button{flex:0 0 auto}
+  }
+  @media(max-width:420px){
+    .rt-accts li .nm small{display:none}   /* 极窄屏先藏档位，保名称和数字 */
   }
 </style></head><body>
 <div class="wrap">
@@ -249,7 +278,7 @@ PAGE = """<!doctype html>
   </div>
 
   <details class="src" id="srcbox" hidden>
-    <summary>来源明细</summary>
+    <summary>来源明细 <span class="cnt" id="srccnt"></span></summary>
     <div id="src"></div>
   </details>
 </div>
@@ -336,11 +365,11 @@ async function loadState(){
 
 function parseRun(md){
   const cells = {};
-  const lines = md.split('\\n');
+  const lines = md.split('\n');
   let cur = null;
   for (const raw of lines) {
     const line = raw.trimEnd();
-    const m = line.match(/^###\\s+(✅|⚪|❌|⚠️|🔇|💬)\\s+([^—-]+)(?:——\\s*(.*))?$/);
+    const m = line.match(/^###\s+(✅|⚪|❌|⚠️|🔇|💬)\s+([^—-]+)(?:——\s*(.*))?$/);
     if (m) {
       cur = {status: 'ok', count: 0, note: (m[3] || '').trim()};
       if (m[1] === '⚪') { cur.status = 'ok'; cur.note = cur.note || '0 命中'; }
@@ -351,8 +380,8 @@ function parseRun(md){
       if (key) cells[key] = cur;
       continue;
     }
-    if (cur && /^- \\[/.test(line)) cur.count++;
-    const sum = line.match(/\\*\\*汇总\\*\\*：([\\s\\S]+)/);
+    if (cur && /^- \[/.test(line)) cur.count++;
+    const sum = line.match(/\*\*汇总\*\*：([\s\S]+)/);
     if (sum) cur = cur; // 汇总行单独处理
   }
   let okc = 0, fail = 0, skip = 0;
@@ -397,8 +426,10 @@ async function run(){
     $('#foot-note').textContent = '本轮耗时 ' + d.secs + 's · ' +
       (deep ? 'deep 含 4 路限额通道（成功才记账）' : '默认档 9 路，7 路完全免 Key');
     renderLog(d.markdown);
-    $('#src').innerHTML = md2html(d.markdown);
+    $('#src').innerHTML = renderSources(d.markdown);
+    $('#srccnt').textContent = lastRun.stats.ok + ' 路有结果 · ' + lastRun.stats.fail + ' 路失败';
     $('#srcbox').hidden = false;
+    $('#srcbox').open = true;
     render();
   } catch (e) {
     $('#node-pill').textContent = '失败';
@@ -412,17 +443,17 @@ async function run(){
 function renderLog(md){
   const rows = [];
   let cur = null;
-  for (const raw of md.split('\\n')) {
+  for (const raw of md.split('\n')) {
     const line = raw.trimEnd();
-    const m = line.match(/^###\\s+(✅|⚪|❌|⚠️|🔇|💬)\\s+(.+)$/);
+    const m = line.match(/^###\s+(✅|⚪|❌|⚠️|🔇|💬)\s+(.+)$/);
     if (m) {
       cur = {mark: m[1], name: m[2].replace(/——.*$/, '').trim(), items: [], note: ''};
-      const tail = m[2].match(/——\\s*(.+)$/);
+      const tail = m[2].match(/——\s*(.+)$/);
       if (tail) cur.note = tail[1];
       rows.push(cur);
       continue;
     }
-    if (cur && /^- \\[/.test(line)) cur.items.push(line);
+    if (cur && /^- \[/.test(line)) cur.items.push(line);
   }
   $('#log').innerHTML = rows.map(r => {
     const cls = r.mark === '✅' || r.mark === '💬' ? 'ok' : (r.mark === '❌' || r.mark === '⚠️') ? 'fail' : '';
@@ -433,28 +464,51 @@ function renderLog(md){
   $('#logbox').hidden = rows.length === 0;
 }
 
-function md2html(md){
-  const out = [];
-  for (const raw of md.split('\\n')) {
+function renderSources(md){
+  const blocks = [];
+  let cur = null;
+  const flush = () => { if (cur) blocks.push(cur); cur = null; };
+  const lines = md.replace(/\\n/g, '\n').split('\n');
+  for (const raw of lines) {
     const line = raw.trimEnd();
-    if (!line.trim() || line.trim() === '---') continue;
-    if (line.startsWith('### ') || line.startsWith('## ')) {
-      out.push('<h4>' + esc(line.replace(/^#+ /, '')) + '</h4>'); continue;
-    }
-    if (line.startsWith('- ')) {
-      let t = line.slice(2);
-      const m = t.match(/^\\[([^\\]]+)\\]\\(([^)]+)\\)(.*)$/);
-      t = m ? '<a href="' + m[2] + '" target="_blank" rel="noreferrer">' + esc(m[1]) + '</a>' + esc(m[3])
-            : esc(t);
-      out.push('<li>' + t + '</li>');
-      continue;
-    }
-    let cls = 'note';
-    if (line.includes('⚠️') || line.includes('❌')) cls = 'warn';
-    if (line.startsWith('**汇总**') || line.startsWith('**通道健康**') || line.startsWith('**下一步**')) cls = 'sum';
-    out.push('<div class="' + cls + '">' + esc(line).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>') + '</div>');
+    if (/^## /.test(line)) continue;
+    const h = line.match(/^### (.+)$/);
+    if (h) { flush(); cur = {title: h[1], note: '', items: [], text: ''}; continue; }
+    if (!cur) continue;
+    if (/^_.+_$/.test(line.trim())) { cur.note = line.trim().slice(1, -1); continue; }
+    const it = line.match(/^- \[(.+?)\]\((.+?)\)(?: — (.*))?$/);
+    if (it) { cur.items.push({t: it[1], u: it[2], x: it[3] || ''}); continue; }
+    if (line.startsWith('- ')) { cur.items.push({t: line.slice(2), u: '', x: ''}); continue; }
+    if (/^(\*\*|---)/.test(line)) continue;
+    if (line.trim()) cur.text += line.trim() + '\n';
   }
-  return out.join('');
+  flush();
+
+  return blocks.map(b => {
+    // emoji 里 💬/🔇 是代理对，字符类只吃一个码点会把半个字符留在名字里 → 用 startsWith
+    const MARKS = ['✅', '⚪', '❌', '⚠️', '🔇', '💬'];
+    const mark = MARKS.find(m => b.title.startsWith(m)) || '';
+    const name = b.title.slice(mark.length).replace(/ —— .*$/, '').trim();
+    const cls = '✅💬'.includes(mark) ? 'ok' : ('❌⚠️'.includes(mark) ? 'bad' : 'idle');
+    const cnt = b.items.length ? b.items.length + ' 条'
+              : (mark === '⚪' ? '0 命中' : mark === '🔇' ? '跳过' : '');
+    let body = '';
+    if (b.items.length) {
+      const shown = b.items.slice(0, 8);
+      body = '<ul>' + shown.map(i => '<li>' +
+        (i.u ? '<a href="' + i.u + '" target="_blank" rel="noreferrer">' + esc(i.t) + '</a>' : esc(i.t)) +
+        (i.x ? '<span class="meta">' + esc(i.x) + '</span>' : '') + '</li>').join('') + '</ul>';
+      if (b.items.length > shown.length) {
+        body += '<div class="note">另有 ' + (b.items.length - shown.length) + ' 条未显示</div>';
+      }
+    } else if (b.text.trim()) {
+      const txt = b.text.trim();
+      body = '<p class="txt">' + esc(txt.slice(0, 900)) + (txt.length > 900 ? '…' : '') + '</p>';
+    }
+    const noteHtml = (b.note && b.items.length) ? '<div class="note">' + esc(b.note) + '</div>' : '';
+    return '<section class="grp ' + cls + '"><h5><i></i>' + esc(name) +
+           (cnt ? '<span class="cnt">' + cnt + '</span>' : '') + '</h5>' + noteHtml + body + '</section>';
+  }).join('');
 }
 
 $('#go').onclick = run;
