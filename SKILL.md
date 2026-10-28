@@ -29,7 +29,7 @@ upstream:
 
 > **pi 用户**：本技能另有一个插件版（`pi-extension/d-reach.ts`），三件事已做成原生工具：
 > `d_reach`（检索，auto/quick/base/deep 四档）、`d_reach_fetch`（抓 URL，四档自动降级）、
-> `d_reach_quota`（额度+健康）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
+> `d_reach_quota`（额度+健康）、`d_reach_social`（B站/小红书登录态体检与搜索）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
 >
 > **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
 > `SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills`
