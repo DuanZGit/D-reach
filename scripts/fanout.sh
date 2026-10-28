@@ -643,18 +643,18 @@ health = load_health()
 now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 def mark(key, status):
-    """ok / fail / skip。skip 不计失败，避免「本轮没请求」把通道判死。"""
-    v = health.setdefault(key, {"ok": 0, "fail": 0, "streak_fail": 0})
+    """只记「连败几次 + 最后成败时间」。skip 不计失败，避免本轮没请求把通道判死。
+
+    ponytail: 阈值硬编码 3 次（launch 里判断）。取小值是为了「偶发网络抖动别一发就拉黑」；
+    真出现反复误杀再提到环境变量。
+    """
+    v = health.setdefault(key, {"streak_fail": 0})
     if status == "ok":
-        v["ok"] = v.get("ok", 0) + 1
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
     elif status == "fail":
-        v["fail"] = v.get("fail", 0) + 1
         v["streak_fail"] = v.get("streak_fail", 0) + 1
         v["last_fail"] = now_iso
-    else:
-        v["last_skip"] = now_iso
 
 total, okc, zero = 0, 0, 0
 skipped, failed = [], []
