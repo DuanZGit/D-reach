@@ -148,7 +148,9 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 ## 可视化网关（可选，人看状态用）
 
 ```bash
-python3 scripts/gateway.py --port 3426     # 或直接 systemctl --user start d-reach-gateway
+python3 scripts/gateway.py                 # 只绑 127.0.0.1，无 key
+python3 scripts/gateway.py --lan           # 绑 0.0.0.0，局域网可访问，要 ?k=<key>
+                                           # key 首次自动生成在 ~/.agent-reach/gateway.key
 ```
 
 浏览器开 `http://127.0.0.1:3426/`：左边通道健康（连败几次、最后成功时间），右边本地额度 vs 官方剩余，
@@ -159,7 +161,9 @@ GET  /api/state     → 通道 + 额度状态（JSON）
 POST /api/search    → {"q":"...","deep":true,"on":"hn,exa"} → {ok, markdown, secs}
 ```
 
-只绑回环地址、无鉴权，**不要往公网映射**；要手机看走 Caddy + 鉴权（同 sev 面板那套）。
+`--lan` 模式下三重限制：源 IP 必须在 `127.0.0.0/8`、`192.168.5.0/24`、`10.7.0.0/24` 内；
+URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段（ufw 3426）。
+**不要往公网映射** —— 链接即权限，拿到就能跑搜索。要公网走 Caddy + 鉴权（同 sev 那套）。
 
 ## 铺开器 fanout.sh（L2 起必用）
 
