@@ -67,12 +67,21 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 
 | 入口 | 作用 |
 | --- | --- |
-| 工具 `d_reach` | 参数 `query` + `profile`(quick/base/deep) + `channels`；返回精简摘要，完整结果写 `~/.agent-reach/last-run.md` |
+| 工具 `d_reach` | 参数 `query` + `profile`(auto/quick/base/deep) + `channels`；返回精简摘要，完整结果写 `~/.agent-reach/last-run.md` |
 | 工具 `d_reach_state` | 通道健康（连败/最后成功）+ 限额通道已用/官方剩余 |
 | 命令 `/reach` `/reach-deep` | 交互式跑一轮，结果只弹通知 |
 
-**profile 就是分级路由**：`quick` 只打 3 路互补通道（千帆 + Firecrawl Dev + TinyFish，约 5s），
-`base` 9 路，`deep` 13 路含限额通道。点查用 quick，调研用 base/deep，别一律铺满。
+**profile 就是分级路由**，默认 `auto`：
+
+| 档 | 行为 | 何时用 |
+| --- | --- | --- |
+| `auto`（默认） | 按 query 特征自动选 3 路 | 绝大多数情况 |
+| `quick` | 固定 3 路（千帆 + Firecrawl Dev + TinyFish） | 已知要中英通用 |
+| `base` | 9 路 | 调研、要多来源互证 |
+| `deep` | 13 路含限额通道 | 深挖、要一手源 |
+
+`auto` 的判定（顺序即优先级）：学术关键词 → OpenAlex/Crossref/Research Index；时效词（最新/价格/发布）→ LangSearch/TinyFish/千帆；
+中文 + 技术词 → 千帆/StackExchange/掘金；纯中文 → 千帆/掘金/SegmentFault；纯英文技术 → StackExchange/Firecrawl Dev/TinyFish；其余走通用兜底。
 
 ## 免费额度一览
 

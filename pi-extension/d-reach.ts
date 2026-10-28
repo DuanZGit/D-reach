@@ -32,10 +32,32 @@ const LAST_RUN = join(DATA_DIR, "last-run.md");
 
 /** 分级：quick 只打 3 路互补通道，省时间省额度 */
 const PROFILES = {
-	quick: { label: "quick · 3 路", on: "qianfan,fcdev,tf" },
+	auto: { label: "auto · 按意图选 3 路", on: "" },
+	quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
 	base: { label: "base · 9 路", on: "" },
 	deep: { label: "deep · 13 路", on: "" },
 } as const;
+
+/**
+ * 按 query 特征选通道（真·意图路由）。
+ * 只挑 2-4 路，剩下的交给 base/deep 档；命中不准时用 channels 参数覆盖。
+ */
+function pickByIntent(query: string): { on: string; why: string } {
+	const zh = /[\u4e00-\u9fff]/.test(query);
+	const paper = /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述)/i.test(query);
+	const news = /(最新|今天|昨天|本周|发布|上线|价格|股价|行情|release|changelog|202[5-9])/i.test(query);
+	const code = /(error|exception|traceback|stack ?trace|compile|build|报错|编译|部署|配置|安装|依赖|函数)/i.test(query);
+	// 中文 query 里夹的英文技术词，判断"中文技术"而不是"中文通用"
+	const tech = /\b(mtu|wireguard|docker|k8s|kubernetes|python|java|rust|golang|node|api|sdk|http|tcp|udp|sql|git|nginx|redis|kafka|postgres|mysql|linux|bug|fix)\b/i.test(query);
+
+	if (paper) return { on: "oalex,crossref,fcres", why: "学术：OpenAlex + Crossref + Research Index" };
+	if (news) return { on: "langsearch,tf,qianfan", why: "时效：LangSearch + TinyFish + 千帆" };
+	if (zh && (code || tech)) return { on: "qianfan,se,jj", why: "中文技术：千帆 + StackExchange + 掘金" };
+	if (zh) return { on: "qianfan,jj,segfault", why: "中文通用：千帆 + 掘金 + SegmentFault" };
+	if (code || tech) return { on: "se,fcdev,tf", why: "英文技术：StackExchange + Firecrawl Dev + TinyFish" };
+
+	return { on: "tf,fcdev,qianfan", why: "通用兜底：TinyFish + Firecrawl Dev + 千帆" };
+}
 
 type Profile = keyof typeof PROFILES;
 
@@ -160,15 +182,21 @@ async function runFanout(
 	query: string,
 	profile: Profile,
 	channels: string,
-): Promise<{ md: string; secs: number }> {
+): Promise<{ md: string; secs: number; on: string; why: string }> {
 	const args = [FANOUT, query];
 	if (profile === "deep") args.push("--deep");
-	const on = channels || PROFILES[profile].on;
+	let why = "";
+	let on = channels || PROFILES[profile].on;
+	if (!on && profile === "auto") {
+		const picked = pickByIntent(query);
+		on = picked.on;
+		why = picked.why;
+	}
 	if (on) args.push("--on", on);
 
 	const t0 = Date.now();
 	const { stdout } = await run("bash", args, { timeout: 200_000, maxBuffer: 8 << 20 });
-	return { md: stdout, secs: (Date.now() - t0) / 1000 };
+	return { md: stdout, secs: (Date.now() - t0) / 1000, on, why };
 }
 
 async function persist(md: string, query: string): Promise<string> {
@@ -188,8 +216,16 @@ const searchTool = defineTool({
 		query: Type.String({ description: "检索词，中英文均可" }),
 		profile: Type.Optional(
 			Type.Union(
-				[Type.Literal("quick"), Type.Literal("base"), Type.Literal("deep")],
-				{ description: "quick=3 路点查，base=9 路默认，deep=13 路含限额通道" },
+				[
+					Type.Literal("auto"),
+					Type.Literal("quick"),
+					Type.Literal("base"),
+					Type.Literal("deep"),
+				],
+				{
+					description:
+						"auto=按 query 意图自动选 3 路（默认推荐）；quick=固定 3 路；base=9 路；deep=13 路含限额通道",
+				},
 			),
 		),
 		channels: Type.Optional(
@@ -202,14 +238,15 @@ const searchTool = defineTool({
 		if (!query) {
 			return { content: [{ type: "text", text: "query 不能为空" }], isError: true };
 		}
-		const profile = (params.profile ?? "base") as Profile;
+		const profile = (params.profile ?? "auto") as Profile;
 		try {
-			const { md, secs } = await runFanout(query, profile, params.channels ?? "");
+			const { md, secs, on, why } = await runFanout(query, profile, params.channels ?? "");
 			const parsed = parseFanout(md);
 			const file = await persist(md, query);
 			const perChannel = profile === "quick" ? 3 : 2;
 			const text = [
-				`d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s`,
+				`d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
+					(why ? ` · ${why}` : on ? ` · ${on}` : ""),
 				brief(parsed, perChannel),
 				"",
 				`完整结果（含全部来源与原因）：${file}`,
