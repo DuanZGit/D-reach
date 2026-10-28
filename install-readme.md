@@ -109,9 +109,10 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 | BrightData | `https://mcp.brightdata.com/mcp?token=<token>`（SSE 版：`/sse?token=`） | token 直接放 query | `npx @brightdata/mcp` + `API_TOKEN` | 31 个（`search_engine`/`scrape_as_markdown`…） | 未挂 |
 | Jina | `https://mcp.jina.ai/v1` | header `Authorization: Bearer $JINA_API_KEY`（可省略，限额更紧） | `npx -y mcp-remote https://mcp.jina.ai/v1` | 12 个（`read_url`/`search_web`/`search_arxiv`/`extract_pdf`） | 未挂 |
 | LangSearch | `https://mcp.langsearch.com/mcp`（Streamable HTTP，**路径必须带 `/mcp`**） | `Authorization: Bearer <LangSearch API key>` | — | 1 个（`web_search`） | **已挂** |
+| DeepWiki | `https://mcp.deepwiki.com/mcp` | **免 key** | — | `ask_wiki_question`、`read_wiki_contents`、`read_wiki_structure` | **已挂** |
 
 > 上表的端点、工具数都是 2026-10-26 用本机 key 实测 `tools/list` 拿到的，不是抄文档。
-> 本机 `mcp.json` 已挂：tinyfish / exa / langsearch / rea（`pi mcp list` 全部 connected）。
+> 本机 `mcp.json` 已挂：deepwiki / tinyfish / exa / langsearch / rea（`pi mcp list` 全部 connected）。
 > 需要带 session 的（BrightData / TinyFish）先 `initialize` 拿 `Mcp-Session-Id`，后续请求要带上，否则 400。
 
 客户端配置样例（支持标准 `mcpServers` 的客户端通用）：
@@ -120,6 +121,7 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 {
   "mcpServers": {
     "exa": { "url": "https://mcp.exa.ai/mcp" },
+    "deepwiki": { "url": "https://mcp.deepwiki.com/mcp" },
     "jina": {
       "url": "https://mcp.jina.ai/v1",
       "headers": { "Authorization": "Bearer ${JINA_API_KEY}" }
@@ -135,7 +137,7 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 
 几点说明：
 
-- **免 key 也能连**的只有 Exa（限速档），其余官方 MCP 都要 key（同一把，不用申请两次）。
+- **免 key 也能连**的只有 Exa（限速档）和 DeepWiki，其余官方 MCP 都要 key（同一把，不用申请两次）。
 - **Serper 没有官方 MCP**（GitHub 上只有社区包 `mcp-server-serper` / `serper-mcp-server`），要接就自己评估第三方实现。
 - MCP 走的是各服务自己的配额，本技能 `quota.py` 只管 REST 调用；走 MCP 时不记账，别以为「没记账 = 随便用」。
 - 不适合挂 MCP 的客户端（纯 HTTP 环境）照旧用 REST + `scripts/load_key.sh`，能力一样。
@@ -143,7 +145,7 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 ### 4.4 完全不需要 key 的通道（装机即用，深挖主力）
 
 `cn.bing`、Firecrawl Developer Index、StackExchange、HN Algolia、掘金、SegmentFault、
-OpenAlex、Crossref、GitHub（`gh` 登录即可）、yt-dlp。
+OpenAlex、Crossref、GitHub（`gh` 登录即可）、DeepWiki、yt-dlp。
 
 这些通道**不限量、不记账**，L2 起步就该一次铺满 —— 闲置才是浪费。
 
