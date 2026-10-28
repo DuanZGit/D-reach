@@ -1,18 +1,15 @@
 /**
  * d-reach 插件版（与 skill 并行，不替代）
  *
- * skill 版靠 agent 读 SKILL.md 自己拼命令；这个插件把同一套通道变成 pi 原生工具，
- * 由模型直接调用，并且多一层「分级」：quick / base / deep 三档按需选路。
+ * 定位：skill 里那些「要读 SKILL.md 才知道怎么拼」的操作，在这里变成一次工具调用。
  *
- * 工具
- *   d_reach        跑一轮检索，返回精简摘要 + 结构化 details（完整结果落盘）
- *   d_reach_state  通道健康 + 额度（读 channels.json / quota.json）
+ *   d_reach         并发检索（auto 按意图选路 / quick / base / deep）
+ *   d_reach_fetch   抓一个 URL，自动在 curl → TinyFish → Jina → BrightData 之间降级
+ *   d_reach_quota   额度与通道健康（可选顺带跑一次官方校准）
  *
- * 命令
- *   /reach <query>        等价于 d_reach 的 base 档，结果只弹通知
- *   /reach-deep <query>   deep 档
+ *   /reach、/reach-deep   交互式跑一轮，结果只弹通知
  *
- * 后端仍然是 skill 里的 scripts/fanout.sh —— 这个插件只是多一个入口，不复制逻辑。
+ * 所有检索/记账逻辑仍在 skill 的 scripts/ 里，插件不复制一份。
  */
 
 import { execFile } from "node:child_process";
@@ -26,11 +23,16 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const run = promisify(execFile);
 const SKILL_DIR = join(homedir(), ".agents/skills/d-reach");
-const FANOUT = join(SKILL_DIR, "scripts/fanout.sh");
+const FANOUT = join(SKILL_DIR, "scripts", "fanout.sh");
+const KEY_SH = join(SKILL_DIR, "scripts", "load_key.sh");
+const PROBE = join(SKILL_DIR, "scripts", "quota_probe.py");
 const DATA_DIR = join(homedir(), ".agent-reach");
 const LAST_RUN = join(DATA_DIR, "last-run.md");
+const UA =
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
 
-/** 分级：quick 只打 3 路互补通道，省时间省额度 */
+// ---------------------------------------------------------------- 检索
+
 const PROFILES = {
 	auto: { label: "auto · 按意图选 3 路", on: "" },
 	quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
@@ -38,16 +40,14 @@ const PROFILES = {
 	deep: { label: "deep · 13 路", on: "" },
 } as const;
 
-/**
- * 按 query 特征选通道（真·意图路由）。
- * 只挑 2-4 路，剩下的交给 base/deep 档；命中不准时用 channels 参数覆盖。
- */
+type Profile = keyof typeof PROFILES;
+
+/** 按 query 特征选通道。命中不准时用 channels 参数覆盖。 */
 function pickByIntent(query: string): { on: string; why: string } {
 	const zh = /[\u4e00-\u9fff]/.test(query);
 	const paper = /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述)/i.test(query);
 	const news = /(最新|今天|昨天|本周|发布|上线|价格|股价|行情|release|changelog|202[5-9])/i.test(query);
 	const code = /(error|exception|traceback|stack ?trace|compile|build|报错|编译|部署|配置|安装|依赖|函数)/i.test(query);
-	// 中文 query 里夹的英文技术词，判断"中文技术"而不是"中文通用"
 	const tech = /\b(mtu|wireguard|docker|k8s|kubernetes|python|java|rust|golang|node|api|sdk|http|tcp|udp|sql|git|nginx|redis|kafka|postgres|mysql|linux|bug|fix)\b/i.test(query);
 
 	if (paper) return { on: "oalex,crossref,fcres", why: "学术：OpenAlex + Crossref + Research Index" };
@@ -55,11 +55,8 @@ function pickByIntent(query: string): { on: string; why: string } {
 	if (zh && (code || tech)) return { on: "qianfan,se,jj", why: "中文技术：千帆 + StackExchange + 掘金" };
 	if (zh) return { on: "qianfan,jj,segfault", why: "中文通用：千帆 + 掘金 + SegmentFault" };
 	if (code || tech) return { on: "se,fcdev,tf", why: "英文技术：StackExchange + Firecrawl Dev + TinyFish" };
-
 	return { on: "tf,fcdev,qianfan", why: "通用兜底：TinyFish + Firecrawl Dev + 千帆" };
 }
-
-type Profile = keyof typeof PROFILES;
 
 interface Hit {
 	title: string;
@@ -68,7 +65,6 @@ interface Hit {
 }
 
 interface ChannelResult {
-	key: string;
 	name: string;
 	mark: string;
 	status: "ok" | "zero" | "fail" | "skip";
@@ -92,7 +88,6 @@ const MARK_STATUS: Record<string, ChannelResult["status"]> = {
 	"🔇": "skip",
 };
 
-/** 把 fanout.sh 的 markdown 解析成结构；解析不了就退化成空列表，不抛错 */
 function parseFanout(md: string): Parsed {
 	const channels: ChannelResult[] = [];
 	let cur: ChannelResult | null = null;
@@ -113,18 +108,10 @@ function parseFanout(md: string): Parsed {
 				rest = dash[1];
 				note = dash[2];
 			}
-			cur = {
-				key: "",
-				name: rest.trim(),
-				mark,
-				status: MARK_STATUS[mark] ?? "zero",
-				note,
-				hits: [],
-			};
+			cur = { name: rest.trim(), mark, status: MARK_STATUS[mark] ?? "zero", note, hits: [] };
 			channels.push(cur);
 			continue;
 		}
-
 		if (line.startsWith("**汇总**")) {
 			summary = line.replace(/^\*\*汇总\*\*：/, "").replace(/\*\*/g, "").trim();
 			cur = null;
@@ -139,7 +126,6 @@ function parseFanout(md: string): Parsed {
 			cur = null;
 			continue;
 		}
-
 		if (cur) {
 			const item = line.match(/^-\s+\[(.+?)\]\((.+?)\)(?:\s+—\s+(.*))?$/);
 			if (item) {
@@ -150,27 +136,27 @@ function parseFanout(md: string): Parsed {
 			if (plain) cur.hits.push({ title: plain[1], url: "", note: "" });
 		}
 	}
-
 	return { channels, summary, next, health };
 }
 
-/** 模型看到的文本：只给状态 + 每路前 N 条，避免一次灌几千字 */
-function brief(parsed: Parsed, perChannel: number): string {
-	const lines: string[] = [];
+function stateOf(ch: ChannelResult): string {
+	if (ch.mark === "💬") return "AI 摘要（非来源，可当线索）";
+	if (ch.status === "ok") return `${ch.hits.length} 条`;
+	if (ch.status === "zero") return "0 命中";
+	if (ch.status === "skip") return `跳过${ch.note ? `（${ch.note}）` : ""}`;
+	return `失败${ch.note ? `（${ch.note}）` : ""}`;
+}
+
+function renderSearch(parsed: Parsed, perChannel: number, title: string): string {
+	const lines: string[] = [title];
 	for (const ch of parsed.channels) {
-		const state =
-			ch.mark === "💬"
-				? "AI 摘要（非来源，可当线索）"
-				: ch.status === "ok"
-				? `${ch.hits.length} 条`
-				: ch.status === "zero"
-					? "0 命中"
-					: ch.status === "skip"
-						? `跳过${ch.note ? `（${ch.note}）` : ""}`
-						: `失败${ch.note ? `（${ch.note}）` : ""}`;
-		lines.push(`- ${ch.name}：${state}`);
+		lines.push(`- ${ch.name}：${stateOf(ch)}`);
+		if (ch.status !== "ok" && ch.status !== "zero") continue;
 		for (const hit of ch.hits.slice(0, perChannel)) {
 			lines.push(`  · ${hit.title}${hit.url ? ` — ${hit.url}` : ""}`);
+		}
+		if (ch.hits.length > perChannel) {
+			lines.push(`  · …另有 ${ch.hits.length - perChannel} 条`);
 		}
 	}
 	if (parsed.summary) lines.push("", `汇总：${parsed.summary}`);
@@ -199,60 +185,203 @@ async function runFanout(
 	return { md: stdout, secs: (Date.now() - t0) / 1000, on, why };
 }
 
-async function persist(md: string, query: string): Promise<string> {
+async function persist(md: string, tag: string): Promise<string> {
 	await mkdir(DATA_DIR, { recursive: true });
-	await writeFile(LAST_RUN, `<!-- ${query} -->\n${md}`, "utf8");
+	await writeFile(LAST_RUN, `<!-- ${tag} -->\n${md}`, "utf8");
 	return LAST_RUN;
 }
+
+// ---------------------------------------------------------------- 抓 URL
+
+/** 走 load_key.sh 拿 key，与整个技能同一条查找链 */
+async function loadKey(name: string): Promise<string | null> {
+	try {
+		const { stdout } = await run("sh", [KEY_SH, name, ""], { timeout: 8000 });
+		return stdout.trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+/** 粗转文本：优先只取 <main>/<article>，去掉脚本样式再剥标签。精细转换交给 Jina。 */
+function htmlToText(html: string): string {
+	const scoped = html.match(/<(main|article)\b[\s\S]*?<\/\1>/i);
+	return (scoped ? scoped[0] : html)
+		.replace(/<script[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style[\s\S]*?<\/style>/gi, " ")
+		.replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+		.replace(/<\/(p|div|li|tr|h[1-6]|br)>/gi, "\n")
+		.replace(/<[^>]+>/g, " ")
+		.replace(/&nbsp;/g, " ")
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/[ \t]+/g, " ")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+function looksLikeShell(html: string): boolean {
+	const s = html.slice(0, 4000).toLowerCase();
+	return (
+		s.includes("enable javascript") ||
+		s.includes("请开启 javascript") ||
+		s.includes("cf-challenge") ||
+		s.includes("just a moment") ||
+		html.length < 1200
+	);
+}
+
+interface Fetched {
+	via: string;
+	text: string;
+	chars: number;
+}
+
+async function viaCurl(url: string): Promise<Fetched | null> {
+	const { stdout } = await run(
+		"curl",
+		["-sL", "--compressed", "--max-time", "15", "-A", UA, url],
+		{ maxBuffer: 8 << 20, timeout: 20_000 },
+	);
+	if (looksLikeShell(stdout)) return null;
+	const text = /<html|<!doctype/i.test(stdout) ? htmlToText(stdout) : stdout.trim();
+	if (text.length < 400) return null;
+	return { via: "curl 直连", text, chars: text.length };
+}
+
+async function viaTinyfish(url: string): Promise<Fetched | null> {
+	const key = await loadKey("TINYFISH_API_KEY");
+	if (!key) return null;
+	const endpoint = "https://agent.tinyfish.ai/mcp";
+	const call = async (payload: unknown, sid?: string) => {
+		const hdr: Record<string, string> = {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+			"X-API-Key": key,
+		};
+		if (sid) hdr["Mcp-Session-Id"] = sid;
+		const res = await fetch(endpoint, { method: "POST", headers: hdr, body: JSON.stringify(payload) });
+		return { sid: res.headers.get("mcp-session-id") ?? undefined, body: await res.text() };
+	};
+	const init = await call({
+		jsonrpc: "2.0",
+		id: 1,
+		method: "initialize",
+		params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "d-reach-plugin", version: "1" } },
+	});
+	const out = await call(
+		{
+			jsonrpc: "2.0",
+			id: 2,
+			method: "tools/call",
+			params: { name: "fetch_content", arguments: { urls: [url], format: "markdown" } },
+		},
+		init.sid,
+	);
+	const m = out.body.match(/\{[\s\S]*\}/);
+	if (!m) return null;
+	const parsed = JSON.parse(m[0]) as { result?: { content?: Array<{ text?: string }> } };
+	const text = (parsed.result?.content ?? []).map((c) => c.text ?? "").join("\n").trim();
+	if (text.length < 200) return null;
+	return { via: "TinyFish fetch", text, chars: text.length };
+}
+
+async function viaJina(url: string): Promise<Fetched | null> {
+	const key = await loadKey("JINA_API_KEY");
+	const hdr = ["-H", "X-Return-Format: markdown"];
+	if (key) hdr.push("-H", `Authorization: Bearer ${key}`);
+	const { stdout } = await run(
+		"curl",
+		["-sL", "--compressed", "--max-time", "25", "-A", UA, ...hdr, `https://r.jina.ai/${url}`],
+		{ maxBuffer: 8 << 20, timeout: 30_000 },
+	);
+	const text = stdout.trim();
+	if (text.length < 200) return null;
+	return { via: "Jina Reader", text, chars: text.length };
+}
+
+async function viaBrightdata(url: string): Promise<Fetched | null> {
+	const key = await loadKey("BRIGHTDATA_APITOKEN");
+	if (!key) return null;
+	const body = JSON.stringify({
+		zone: process.env.BRIGHTDATA_ZONE || "mcp_unlocker",
+		format: "raw",
+		data_format: "markdown",
+		url,
+	});
+	const { stdout } = await run(
+		"curl",
+		["-sL", "--max-time", "30", "-X", "POST", "https://api.brightdata.com/request",
+			"-H", `Authorization: Bearer ${key}`, "-H", "Content-Type: application/json", "-d", body],
+		{ maxBuffer: 8 << 20, timeout: 35_000 },
+	);
+	const text = stdout.trim();
+	if (text.length < 200 || text.startsWith("{")) return null;
+	return { via: "BrightData", text, chars: text.length };
+}
+
+/** 依次尝试，第一个拿到达标内容的就返回；全部失败如实报告每一档的原因。 */
+async function fetchUrl(url: string, maxChars: number) {
+	const attempts: Array<[string, () => Promise<Fetched | null>]> = [
+		["curl 直连", () => viaCurl(url)],
+		["TinyFish fetch", () => viaTinyfish(url)],
+		["Jina Reader", () => viaJina(url)],
+		["BrightData", () => viaBrightdata(url)],
+	];
+	const failed: string[] = [];
+	for (const [name, fn] of attempts) {
+		try {
+			const got = await fn();
+			if (got) {
+				const text = got.text.length > maxChars ? got.text.slice(0, maxChars) + "\n…（已截断）" : got.text;
+				return { ok: true as const, got: { ...got, text }, failed };
+			}
+			failed.push(`${name}: 内容过短或需 JS`);
+		} catch (e) {
+			failed.push(`${name}: ${e instanceof Error ? e.message.slice(0, 60) : "失败"}`);
+		}
+	}
+	return { ok: false as const, failed };
+}
+
+// ---------------------------------------------------------------- 工具
 
 const searchTool = defineTool({
 	name: "d_reach",
 	label: "d-reach 检索",
 	description:
 		"多通道并发检索：中文走百度千帆、代码走 Firecrawl/StackExchange、通用走 TinyFish/LangSearch。" +
-		"profile=quick 只打 3 路（约 4s，适合点查）；base 9 路（约 6s）；deep 13 路含限额通道（约 12s）。" +
-		"返回精简摘要，完整来源已存到 details.file。",
+		"profile=auto（默认）按 query 意图自动选 3 路；quick 固定 3 路；base 9 路；deep 13 路含限额通道。" +
+		"返回精简摘要，完整来源写到 details.file。",
 	parameters: Type.Object({
 		query: Type.String({ description: "检索词，中英文均可" }),
 		profile: Type.Optional(
 			Type.Union(
-				[
-					Type.Literal("auto"),
-					Type.Literal("quick"),
-					Type.Literal("base"),
-					Type.Literal("deep"),
-				],
-				{
-					description:
-						"auto=按 query 意图自动选 3 路（默认推荐）；quick=固定 3 路；base=9 路；deep=13 路含限额通道",
-				},
+				[Type.Literal("auto"), Type.Literal("quick"), Type.Literal("base"), Type.Literal("deep")],
+				{ description: "auto=按意图选 3 路（默认）；quick=固定 3 路；base=9 路；deep=13 路" },
 			),
 		),
-		channels: Type.Optional(
-			Type.String({ description: "显式指定通道，逗号分隔，如 hn,exa；会覆盖 profile 的路由" }),
+		channels: Type.Optional(Type.String({ description: "显式指定通道，逗号分隔，如 hn,exa；覆盖 profile" })),
+		detail: Type.Optional(
+			Type.Union([Type.Literal("brief"), Type.Literal("full")], {
+				description: "brief=每路 2-3 条（默认）；full=每路最多 8 条",
+			}),
 		),
 	}),
 
-	async execute(_id, params, _signal, _onUpdate, _ctx) {
+	async execute(_id, params) {
 		const query = params.query.trim();
-		if (!query) {
-			return { content: [{ type: "text", text: "query 不能为空" }], isError: true };
-		}
+		if (!query) return { content: [{ type: "text", text: "query 不能为空" }], isError: true };
 		const profile = (params.profile ?? "auto") as Profile;
 		try {
 			const { md, secs, on, why } = await runFanout(query, profile, params.channels ?? "");
 			const parsed = parseFanout(md);
 			const file = await persist(md, query);
-			const perChannel = profile === "quick" ? 3 : 2;
-			const text = [
-				`d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
-					(why ? ` · ${why}` : on ? ` · ${on}` : ""),
-				brief(parsed, perChannel),
-				"",
-				`完整结果（含全部来源与原因）：${file}`,
-			].join("\n");
+			const perChannel = params.detail === "full" ? 8 : profile === "quick" ? 3 : 2;
+			const head = `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` + (why ? ` · ${why}` : on ? ` · ${on}` : "");
 			return {
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text: `${renderSearch(parsed, perChannel, head)}\n\n完整结果：${file}` }],
 				details: {
 					query,
 					profile,
@@ -270,21 +399,76 @@ const searchTool = defineTool({
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			return {
-				content: [{ type: "text", text: `d-reach 执行失败：${msg.slice(0, 300)}` }],
-				isError: true,
-			};
+			return { content: [{ type: "text", text: `d-reach 执行失败：${msg.slice(0, 300)}` }], isError: true };
 		}
 	},
 });
 
-const stateTool = defineTool({
-	name: "d_reach_state",
-	label: "d-reach 状态",
-	description: "看各通道健康（连败次数、最后成功）与限额通道已用/上限，判断这轮还能不能铺满。",
-	parameters: Type.Object({}),
+const fetchTool = defineTool({
+	name: "d_reach_fetch",
+	label: "d-reach 抓网页",
+	description:
+		"抓一个 URL 的正文，自动在 curl 直连 → TinyFish（真渲染，$0）→ Jina Reader → BrightData 之间降级，" +
+		"返回 markdown/纯文本。适合读文章、文档、issue。反爬站也能拿到（会走 BrightData，消耗额度）。",
+	parameters: Type.Object({
+		url: Type.String({ description: "要抓的完整 URL" }),
+		max_chars: Type.Optional(Type.Number({ description: "正文最多返回多少字符，默认 12000" })),
+	}),
 
-	async execute() {
+	async execute(_id, params) {
+		const url = params.url.trim();
+		if (!/^https?:\/\//i.test(url)) {
+			return { content: [{ type: "text", text: "url 必须以 http:// 或 https:// 开头" }], isError: true };
+		}
+		const maxChars = Math.min(Math.max(params.max_chars ?? 12000, 500), 40000);
+		const t0 = Date.now();
+		const r = await fetchUrl(url, maxChars);
+		const secs = ((Date.now() - t0) / 1000).toFixed(1);
+
+		if (!r.ok) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `四档都失败了（${secs}s）：\n${r.failed.map((x) => `- ${x}`).join("\n")}\n\n` +
+							"如果是登录墙/强反爬，换 browser 会话或让用户贴正文。",
+					},
+				],
+				isError: true,
+			};
+		}
+
+		const skipped = r.failed.length ? `\n先试过：${r.failed.join("；")}` : "";
+		return {
+			content: [
+				{
+					type: "text",
+					text: `来源：${r.got.via} · ${r.got.chars} 字符 · ${secs}s${skipped}\n\n${r.got.text}`,
+				},
+			],
+			details: { url, via: r.got.via, chars: r.got.chars, secs: Number(secs) },
+		};
+	},
+});
+
+const quotaTool = defineTool({
+	name: "d_reach_quota",
+	label: "d-reach 额度",
+	description:
+		"看限额通道已用/上限、官方真实剩余（Firecrawl/TinyFish）、以及哪些通道因连败被自动跳过。" +
+		"refresh=true 会去官方接口重新校准（约 1-2s）。",
+	parameters: Type.Object({
+		refresh: Type.Optional(Type.Boolean({ description: "是否重新校准官方额度" })),
+	}),
+
+	async execute(_id, params) {
+		if (params.refresh) {
+			try {
+				await run("python3", [PROBE, "--max-age", "0"], { timeout: 30_000 });
+			} catch {
+				/* 校准失败不影响本地账本展示 */
+			}
+		}
 		const readJson = async (p: string) => {
 			try {
 				return JSON.parse(await readFile(p, "utf8")) as Record<string, unknown>;
@@ -292,16 +476,18 @@ const stateTool = defineTool({
 				return {};
 			}
 		};
-		const health = await readJson(join(DATA_DIR, "channels.json"));
 		const quota = await readJson(join(DATA_DIR, "quota.json"));
-		const official = (quota._official ?? {}) as Record<string, { state?: string; remaining?: number; total?: number; balance?: string; currency?: string }>;
+		const health = await readJson(join(DATA_DIR, "channels.json"));
+		const official = (quota._official ?? {}) as Record<
+			string,
+			{ state?: string; remaining?: number; total?: number; balance?: string; currency?: string; probed_at?: string }
+		>;
 
-		const lines: string[] = ["通道健康："];
 		const bad = Object.entries(health)
 			.filter(([, v]) => ((v as { streak_fail?: number }).streak_fail ?? 0) >= 3)
 			.map(([k]) => k);
-		lines.push(bad.length ? `  连败 ≥3（下轮自动跳过）：${bad.join(", ")}` : "  没有通道被拉黑");
 
+		const lines: string[] = ["通道健康：", bad.length ? `  连败 ≥3（下轮自动跳过）：${bad.join(", ")}` : "  全部正常"];
 		lines.push("", "限额通道：");
 		for (const [svc, v] of Object.entries(quota)) {
 			if (svc.startsWith("_") || typeof v !== "object" || v === null) continue;
@@ -317,45 +503,37 @@ const stateTool = defineTool({
 							: "";
 			lines.push(`  ${svc}: 本月已用 ${used}${tail}`);
 		}
-		return { content: [{ type: "text", text: lines.join("\n") }], details: { health, quota } };
+		const stamp = Object.values(official)[0]?.probed_at;
+		if (stamp) lines.push("", `官方数据时间：${stamp.slice(0, 16).replace("T", " ")}`);
+		return { content: [{ type: "text", text: lines.join("\n") }], details: { quota, health } };
 	},
 });
 
 export default function dReachExtension(pi: ExtensionAPI) {
 	pi.registerTool(searchTool);
-	pi.registerTool(stateTool);
+	pi.registerTool(fetchTool);
+	pi.registerTool(quotaTool);
+
+	const runCommand = async (args: string, ctx: any, profile: Profile) => {
+		const query = args.trim();
+		if (!query) return ctx.ui.notify("用法：/reach <检索词>", "warning");
+		ctx.ui.notify(`d-reach ${profile} 检索中：${query}`, "info");
+		try {
+			const { md, secs } = await runFanout(query, profile, "");
+			const parsed = parseFanout(md);
+			await persist(md, query);
+			ctx.ui.notify(`完成 ${secs.toFixed(1)}s · ${parsed.summary || "见 last-run.md"}`, "info");
+		} catch (err) {
+			ctx.ui.notify(`失败：${err instanceof Error ? err.message : String(err)}`, "error");
+		}
+	};
 
 	pi.registerCommand("reach", {
-		description: "d-reach 检索（base 档 9 路）",
-		handler: async (args, ctx) => {
-			const query = args.trim();
-			if (!query) return ctx.ui.notify("用法：/reach <检索词>", "warning");
-			ctx.ui.notify(`d-reach 检索中：${query}`, "info");
-			try {
-				const { md, secs } = await runFanout(query, "base", "");
-				const parsed = parseFanout(md);
-				await persist(md, query);
-				ctx.ui.notify(`完成 ${secs.toFixed(1)}s · ${parsed.summary || "见 last-run.md"}`, "info");
-			} catch (err) {
-				ctx.ui.notify(`失败：${err instanceof Error ? err.message : String(err)}`, "error");
-			}
-		},
+		description: "d-reach 检索（auto 按意图选路）",
+		handler: (args, ctx) => runCommand(args, ctx, "auto"),
 	});
-
 	pi.registerCommand("reach-deep", {
-		description: "d-reach 检索（deep 档 13 路）",
-		handler: async (args, ctx) => {
-			const query = args.trim();
-			if (!query) return ctx.ui.notify("用法：/reach-deep <检索词>", "warning");
-			ctx.ui.notify(`d-reach deep 检索中：${query}`, "info");
-			try {
-				const { md, secs } = await runFanout(query, "deep", "");
-				const parsed = parseFanout(md);
-				await persist(md, query);
-				ctx.ui.notify(`完成 ${secs.toFixed(1)}s · ${parsed.summary || "见 last-run.md"}`, "info");
-			} catch (err) {
-				ctx.ui.notify(`失败：${err instanceof Error ? err.message : String(err)}`, "error");
-			}
-		},
+		description: "d-reach 检索（deep 13 路含限额通道）",
+		handler: (args, ctx) => runCommand(args, ctx, "deep"),
 	});
 }
