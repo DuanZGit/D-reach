@@ -5,7 +5,7 @@
   python3 scripts/gateway.py --lan           # 绑 0.0.0.0，局域网可访问，要 ?k=<key>
                                              # 且请求源 IP 必须在 127/192.168.5/10.7 段内
 
-  GET  /                页面
+  GET  /                页面（视觉照 magpie 的路由页）
   GET  /api/state       通道 + 额度状态
   POST /api/search      {"q":"...","deep":true,"on":"hn,exa"}
 
@@ -35,123 +35,403 @@ LAN = False
 KEY = ""
 
 NO_KEY_PAGE = """<!doctype html><meta charset="utf-8"><title>需要访问 key</title>
-<body style="background:#0b1220;color:#e2e8f0;font:14px/1.7 system-ui,'PingFang SC',sans-serif;
+<body style="background:#f2f2f5;color:#1c1c21;font:14px/1.7 system-ui,'PingFang SC',sans-serif;
              display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0">
-<div style="max-width:520px;padding:28px;border:1px solid #243149;border-radius:12px;background:#131c2e">
+<div style="max-width:520px;padding:28px;border:1px solid rgba(0,0,0,.07);border-radius:14px;background:#fff;
+            box-shadow:0 0 0 1px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.04)">
   <div style="font-size:16px;font-weight:600;margin-bottom:10px">需要访问 key</div>
-  <p style="color:#7c8aa5;margin:0 0 12px">网关对局域网开放，必须带 <code>?k=&lt;key&gt;</code> 才能打开。</p>
-  <p style="color:#7c8aa5;margin:0">key 存在机器上的 <code>~/.agent-reach/gateway.key</code>，
+  <p style="color:#6b6b74;margin:0 0 12px">网关对局域网开放，必须带 <code>?k=&lt;key&gt;</code> 才能打开。</p>
+  <p style="color:#6b6b74;margin:0">key 在机器上的 <code>~/.agent-reach/gateway.key</code>，
      或在能登录的终端跑 <code>cat ~/.agent-reach/gateway.key</code> 取。</p>
 </div></body>"""
-ALLOWED = [ipaddress.ip_network(n) for n in ("127.0.0.0/8", "192.168.5.0/24", "10.7.0.0/24")]
 
 PAGE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>d-reach gateway</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>d-reach</title>
 <style>
-  :root{--bg:#0b1220;--card:#131c2e;--line:#243149;--fg:#e2e8f0;--dim:#7c8aa5;
-        --ok:#10b981;--warn:#f59e0b;--bad:#ef4444;--acc:#10b981}
+  :root{
+    --font: system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    --code: "Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+    --bg:#f2f2f5; --card:#ffffff; --card-2:#f8f8fa;
+    --fg:#1c1c21; --fg-2:#4b4b53; --muted:#6b6b74; --faint:#9a9aa3;
+    --line:rgba(0,0,0,.07); --line-2:#ececf0;
+    --green:#189a58; --red:#c0392b; --amber:#b45309;
+    --card-edge:0 0 0 1px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.04);
+    --morph-t:.32s; --morph-ease:cubic-bezier(.42,0,.58,1);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1b1c20; --card:#25262c; --card-2:#212227;
+      --fg:#ededf1; --fg-2:#b9b9c1; --muted:#9c9ca6; --faint:#7c7c87;
+      --line:rgba(255,255,255,.07); --line-2:#2c2c32;
+      --green:#6fd99b; --red:#f87171; --amber:#f2b544;
+      --card-edge:inset 0 0 0 1px rgba(255,255,255,.06); }
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);
-       font:14px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
-  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 40px}
-  header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
-  h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.01em}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
-  .dot.bad{background:var(--bad)}
-  .sub{color:var(--dim);font-size:12px}
-  .grid{display:grid;grid-template-columns:1.12fr 1fr;gap:16px;margin-bottom:16px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 16px 10px;
-        animation:rise .45s cubic-bezier(.16,1,.3,1) both}
-  .grid .card:nth-child(2){animation-delay:.05s}
-  .card:nth-of-type(3){animation-delay:.1s}
-  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  .card h2{font-size:12px;margin:0 0 10px;color:var(--dim);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-  table{width:100%;border-collapse:collapse;font-size:12.5px}
-  td,th{padding:6px;text-align:left;border-bottom:1px solid #1b2740}
-  th{color:var(--dim);font-weight:500;font-size:11px;letter-spacing:.03em}
-  td.n{text-align:right;font-variant-numeric:tabular-nums}
-  tr:last-child td{border-bottom:none}
-  .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;white-space:nowrap}
-  .p-ok{background:#0d3b2c;color:#34d399}
-  .p-warn{background:#3a2c0f;color:#fbbf24}
-  .p-bad{background:#3a1414;color:#f87171}
-  .p-idle{background:#20293d;color:#94a3b8}
-  .bar{height:5px;background:#1b2740;border-radius:99px;overflow:hidden}
-  .bar>i{display:block;height:100%;background:var(--acc)}
-  .bar>i.warn{background:var(--warn)}
-  .bar>i.bad{background:var(--bad)}
-  .search{display:flex;gap:8px;flex-wrap:wrap}
-  input[type=text]{flex:1;min-width:200px;background:#0e1729;border:1px solid var(--line);
-    border-radius:8px;padding:10px 12px;color:var(--fg);font-size:14px}
-  input[type=text]:focus{outline:none;border-color:var(--acc)}
-  select,button{background:#0e1729;border:1px solid var(--line);border-radius:8px;
-    padding:10px 12px;color:var(--fg);font-size:13px;cursor:pointer}
-  button.primary{background:var(--acc);color:#04211a;border-color:var(--acc);font-weight:600}
-  button:disabled{opacity:.55;cursor:default}
-  #out{margin-top:12px;background:#0a1120;border:1px solid var(--line);border-radius:8px;
-    padding:14px;min-height:110px;max-height:520px;overflow:auto;font-size:13px}
-  #out.fresh{animation:fade .35s ease both}
-  @keyframes fade{from{opacity:0}to{opacity:1}}
-  #out h3{font-size:13px;margin:14px 0 6px;color:var(--acc);font-weight:600}
-  #out h3:first-child{margin-top:0}
-  #out ul{margin:6px 0 10px;padding-left:18px}
-  #out li{margin:3px 0}
-  #out a{color:#6ee7b7;text-decoration:none}
-  #out a:hover{text-decoration:underline}
-  #out .muted{color:var(--dim)}
-  #out .warn{color:#fbbf24}
-  #out .bad{color:#f87171}
-  #out .sum{border-top:1px solid var(--line);margin-top:12px;padding-top:10px;font-size:12.5px}
-  .meta{color:var(--dim);font-size:11.5px;margin-top:8px}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);
+    font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 20px 48px}
+
+  .topbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .topbar h1{font-size:14px;font-weight:600;margin:0;letter-spacing:.01em}
+  .live{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+  .live i{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+  .live.off i{background:var(--red)}
+  .grow{flex:1}
+  .ghost{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--fg-2);
+    font-size:12.5px;padding:5px 10px;cursor:pointer;font-family:inherit}
+  .ghost:hover{background:var(--card-2)}
+
+  /* ---- 主卡片：照 magpie 的 .rt ---- */
+  .rt{background:var(--card);border:1px solid var(--line);border-radius:14px;
+      padding:14px 16px 12px;margin:0 0 16px;box-shadow:var(--card-edge)}
+  .rt-top{display:flex;flex-direction:column;gap:3px}
+  .rt-what{font-size:13px;color:var(--muted);margin:0}
+  .rt-what b{color:var(--fg);font-weight:600}
+  .rt-mode{margin:0;font-size:12.5px;color:var(--fg-2);line-height:1.45}
+
+  .rt-stage{position:relative;display:grid;grid-template-columns:124px 124px minmax(0,1fr);
+    column-gap:56px;align-items:center;padding:22px 2px}
+  .rt-wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:0}
+  .rt-wires path{fill:none;stroke:var(--line);stroke-width:1.5;transition:stroke .3s,opacity .3s}
+  .rt-wires path.live{stroke:var(--green);stroke-dasharray:3 5;animation:rtflow .7s linear infinite}
+  .rt-wires path.ok{stroke:var(--green);opacity:.55}
+  .rt-wires path.fail{stroke:var(--red);stroke-dasharray:2 6;opacity:.6}
+  @keyframes rtflow{to{stroke-dashoffset:-8}}
+
+  .rt-node{position:relative;z-index:1;min-width:0;display:flex;flex-direction:column;
+    align-items:center;gap:2px;padding:12px 8px 10px;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;text-align:center}
+  .rt-node b{font-size:13px;font-weight:600;max-width:100%;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .rt-node small{font-size:11px;color:var(--muted);max-width:100%;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .rt-node .glyph{font-size:20px;line-height:1;margin-bottom:3px}
+  .rt-hub{border-color:var(--fg);box-shadow:0 0 0 4px var(--card-2)}
+  .rt-hub i{font-style:normal;font-size:10.5px;font-weight:560;margin-top:5px;
+    padding:1px 8px;border-radius:999px;background:var(--fg);color:var(--card)}
+
+  .rt-accts{position:relative;z-index:1;list-style:none;margin:0;padding:0;
+    display:grid;gap:7px;min-width:0;max-height:330px;overflow:auto}
+  .rt-accts li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;
+    column-gap:10px;row-gap:6px;padding:9px 12px;background:var(--card);
+    border:1px solid var(--line);border-radius:10px;font-size:13px;
+    transition:opacity var(--morph-t),border-color var(--morph-t)}
+  .rt-accts li .st{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .rt-accts li.ok .st{background:var(--green)}
+  .rt-accts li.fail .st{background:var(--red)}
+  .rt-accts li.idle .st{background:var(--faint);opacity:.5}
+  .rt-accts li.hit{border-color:rgba(24,154,88,.5)}
+  .rt-accts li .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rt-accts li .nm small{color:var(--muted);font-size:11.5px;margin-left:6px}
+  .rt-accts li .right{text-align:right;font-size:11.5px;color:var(--muted);
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rt-accts li .bar{grid-column:2 / -1;height:3px;background:var(--line-2);border-radius:99px;overflow:hidden}
+  .rt-accts li .bar>i{display:block;height:100%;background:var(--green);width:0}
+  .rt-accts li .bar>i.warn{background:var(--amber)}
+  .rt-accts li .bar>i.bad{background:var(--red)}
+
+  .rt-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+    border-top:1px solid var(--line);margin-top:8px;padding-top:12px;flex-wrap:wrap}
+  .rt-foot p{margin:0;font-size:12.5px;color:var(--fg-2);line-height:1.5}
+  .stats{display:flex;gap:26px;text-align:right}
+  .stats div{min-width:44px}
+  .stats b{display:block;font-size:24px;line-height:1.1;font-weight:600;
+    font-family:var(--code);font-variant-numeric:tabular-nums}
+  .stats span{font-size:11px;color:var(--muted)}
+
+  .rt-log{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  .rt-log h3{font-size:12.5px;margin:0 0 8px;color:var(--fg-2);font-weight:600}
+  .rt-log ol{list-style:none;margin:0;padding:0;display:grid;gap:5px;font-size:12.5px;color:var(--fg-2)}
+  .rt-log li{display:flex;gap:8px;align-items:baseline}
+  .rt-log li .st{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none;position:relative;top:-1px}
+  .rt-log li.ok .st{background:var(--green)}
+  .rt-log li.fail .st{background:var(--red)}
+  .rt-log li .tx{min-width:0}
+  .rt-log li b{font-weight:600;color:var(--fg)}
+
+  /* ---- 搜索条 ---- */
+  .bar2{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:16px;
+    box-shadow:var(--card-edge)}
+  .bar2 input{flex:1;min-width:200px;background:transparent;border:none;outline:none;
+    color:var(--fg);font-size:14px;font-family:inherit;padding:6px 8px}
+  .bar2 input::placeholder{color:var(--faint)}
+  .bar2 select{background:var(--card-2);border:1px solid var(--line);border-radius:8px;
+    color:var(--fg-2);font-size:12.5px;padding:6px 8px;font-family:inherit;cursor:pointer}
+  .bar2 button{background:var(--fg);color:var(--card);border:none;border-radius:8px;
+    font-size:13px;font-weight:600;padding:8px 16px;cursor:pointer;font-family:inherit}
+  .bar2 button:disabled{opacity:.5;cursor:default}
+
+  /* ---- 来源明细 ---- */
+  .src{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:4px 16px 10px;box-shadow:var(--card-edge)}
+  .src summary{cursor:pointer;font-size:12.5px;color:var(--fg-2);padding:10px 0;
+    list-style:none;display:flex;align-items:center;gap:8px}
+  .src summary::-webkit-details-marker{display:none}
+  .src summary::before{content:"›";color:var(--faint);transition:transform var(--morph-t) var(--morph-ease)}
+  .src[open] summary::before{transform:rotate(90deg)}
+  .src h4{font-size:12.5px;margin:12px 0 4px;color:var(--fg)}
+  .src ul{margin:4px 0 8px;padding-left:18px;font-size:12.5px;color:var(--fg-2)}
+  .src li{margin:2px 0}
+  .src a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line-2)}
+  .src a:hover{border-bottom-color:var(--fg-2)}
+  .src .note{color:var(--muted);font-size:11.5px}
+  .src .warn{color:var(--amber)}
+  .src .bad{color:var(--red)}
+  .src .sum{border-top:1px solid var(--line);margin-top:10px;padding-top:8px;font-size:12.5px;color:var(--fg)}
+
   @media(max-width:860px){
-    .grid{grid-template-columns:1fr}
-    .wrap{padding:16px 14px 32px}
-    .tier{display:none}
-    .card{padding:14px 12px 8px}
-    td,th{padding:6px 4px}
-    td:nth-child(4),th:nth-child(4){display:none}
+    .wrap{padding:14px 12px 36px}
+    .rt{padding:12px 12px 10px}
+    .rt-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px;row-gap:12px;padding:14px 0}
+    .rt-accts{grid-column:1 / -1;max-height:none}
+    .rt-wires{display:none}
+    .rt-foot{gap:12px}
+    .stats{gap:18px}
+    .stats b{font-size:20px}
+    .rt-accts li{grid-template-columns:10px minmax(0,1fr);row-gap:4px}
+    .rt-accts li .right{grid-column:2;text-align:left;padding-bottom:2px}
   }
 </style></head><body>
 <div class="wrap">
-  <header>
-    <span class="dot" id="dot"></span>
-    <h1>d-reach gateway</h1>
-    <span class="sub" id="head"></span>
-  </header>
-
-  <div class="grid">
-    <div class="card"><h2>通道健康</h2><table><thead><tr>
-      <th>通道</th><th class="tier">档</th><th>状态</th><th class="n">连败</th><th>最后成功</th></tr></thead>
-      <tbody id="chans"></tbody></table></div>
-
-    <div class="card"><h2>额度</h2><table><thead><tr>
-      <th>通道</th><th class="n">本地已用</th><th class="n">官方剩余</th></tr></thead>
-      <tbody id="quota"></tbody></table>
-      <div class="meta" id="qmeta"></div></div>
+  <div class="topbar">
+    <h1>d-reach</h1>
+    <span class="live" id="live"><i></i><span id="livetxt">读取中</span></span>
+    <span class="grow"></span>
+    <button class="ghost" id="refresh">刷新</button>
   </div>
 
-  <div class="card">
-    <h2>搜索</h2>
-    <div class="search">
-      <input type="text" id="q" placeholder="要查什么？回车直接跑" autocomplete="off">
-      <select id="mode">
-        <option value="base">默认档（9 路）</option>
-        <option value="deep">deep（+4 路限额）</option>
-      </select>
-      <button class="primary" id="go">跑一轮</button>
+  <div class="bar2">
+    <input id="q" placeholder="要查什么？回车直接跑" autocomplete="off">
+    <select id="mode">
+      <option value="base">默认档 · 9 路</option>
+      <option value="deep">deep · +4 路限额</option>
+    </select>
+    <button id="go">跑一轮</button>
+  </div>
+
+  <div class="rt">
+    <div class="rt-top">
+      <p class="rt-what" id="what"><b>还没有查询</b> · 通道状态来自上一轮</p>
+      <p class="rt-mode" id="mode-why">免费优先：9 路免 Key 通道不限量不限次；deep 才追加 LangSearch / Exa / Firecrawl-Research / BrightData，按次记账、失败不扣。</p>
     </div>
-    <div class="meta" id="timing"></div>
-    <div id="out"><span class="muted">还没有查询结果。输入关键词回车即可。</span></div>
+
+    <div class="rt-stage" id="stage">
+      <svg class="rt-wires" id="wires"></svg>
+      <div class="rt-node">
+        <div class="glyph">⌕</div>
+        <b id="node-q">查询</b>
+        <small id="node-tier">—</small>
+      </div>
+      <div class="rt-node rt-hub">
+        <div class="glyph">⌘</div>
+        <b>fanout</b>
+        <small>并发铺开</small>
+        <i id="node-pill">待命</i>
+      </div>
+      <ul class="rt-accts" id="accts"></ul>
+    </div>
+
+    <div class="rt-foot">
+      <p id="foot-note">通道健康与额度每 5 秒刷新；跑一轮后这里显示本轮走向。</p>
+      <div class="stats">
+        <div><b id="s-req">0</b><span>路有结果</span></div>
+        <div><b id="s-fail">0</b><span>失败</span></div>
+        <div><b id="s-skip">0</b><span>跳过</span></div>
+      </div>
+    </div>
+
+    <div class="rt-log" id="logbox" hidden>
+      <h3>这一轮是怎么跑的</h3>
+      <ol id="log"></ol>
+    </div>
   </div>
+
+  <details class="src" id="srcbox" hidden>
+    <summary>来源明细</summary>
+    <div id="src"></div>
+  </details>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const K = new URLSearchParams(location.search).get('k') || '';
-const api = (p) => p + (K ? (p.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(K) : '');
+const api = p => p + (K ? (p.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(K) : '');
+
+let channels = [];      // /api/state 的通道
+let quota = {};         // key -> {used, limit, official}
+let lastRun = null;     // {q, deep, cells: {key: {status, count, note}}, stats}
+
+function cellFor(ch){
+  const run = lastRun && lastRun.cells[ch.key];
+  if (run) return run;
+  if (ch.streak_fail >= 3) return {status:'fail', count:0, note:'连败 ' + ch.streak_fail + ' 次，默认跳过'};
+  if (ch.streak_fail > 0)  return {status:'warn', count:0, note:'上次失败 ' + ch.streak_fail + ' 次'};
+  if (ch.last_ok)          return {status:'idle', count:0, note:'上次 ' + ch.last_ok.slice(5,16).replace('T',' ')};
+  return {status:'idle', count:0, note:'还没跑过'};
+}
+
+function render(){
+  const ul = $('#accts');
+  ul.innerHTML = channels.map(ch => {
+    const c = cellFor(ch);
+    const q = quota[ch.key] || {};
+    const pct = q.limit ? Math.min(100, (q.used || 0) / q.limit * 100) : 0;
+    const barCls = pct > 85 ? 'bad' : pct > 70 ? 'warn' : '';
+    const cls = c.status === 'ok' ? 'ok' : c.status === 'fail' ? 'fail' : 'idle';
+    const right = q.limit
+      ? (q.used || 0) + ' / ' + q.limit + (c.count ? ' · 本轮 ' + c.count + ' 条' : '')
+      : (c.count ? '本轮 ' + c.count + ' 条' : '免 Key 不限量');
+    return '<li class="' + cls + (c.count ? ' hit' : '') + '">' +
+      '<span class="st"></span>' +
+      '<span class="nm">' + esc(ch.name) + '<small>' + ch.tier + '</small></span>' +
+      '<span class="right">' + esc(right) + '</span>' +
+      (q.limit ? '<span class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></span>' : '') +
+      '</li>';
+  }).join('');
+  drawWires();
+}
+
+function drawWires(){
+  const stage = $('#stage'), hub = document.querySelector('.rt-hub'), svg = $('#wires');
+  if (!stage || !hub || !svg) return;
+  const box = stage.getBoundingClientRect();
+  if (box.width < 400) { svg.innerHTML = ''; return; }
+  svg.setAttribute('viewBox', '0 0 ' + box.width + ' ' + box.height);
+  const hb = hub.getBoundingClientRect();
+  const x1 = hb.right - box.left + 4, y1 = hb.top + hb.height/2 - box.top;
+  const paths = [...document.querySelectorAll('#accts li')].slice(0, 10).map((li, i) => {
+    const rb = li.getBoundingClientRect();
+    const x2 = rb.left - box.left - 4, y2 = rb.top + rb.height/2 - box.top;
+    const cx = (x1 + x2) / 2;
+    const cls = li.classList.contains('ok') ? 'ok' : li.classList.contains('fail') ? 'fail' : '';
+    const live = lastRun && i === 0 ? ' live' : '';
+    return '<path class="' + cls + live + '" d="M' + x1 + ',' + y1 + ' C' + cx + ',' + y1 + ' ' +
+           cx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
+  });
+  svg.innerHTML = paths.join('');
+}
+
+async function loadState(){
+  try {
+    const s = await (await fetch(api('/api/state'))).json();
+    channels = s.channels;
+    quota = {};
+    for (const q of s.quota) quota[q.svc] = q;
+    // 把 quota 的 key 名对齐到通道 key（brightdata <- bd 等）
+    const alias = {bd: 'brightdata', fcres: 'firecrawl'};
+    for (const ch of channels) {
+      if (!quota[ch.key] && alias[ch.key]) quota[ch.key] = quota[alias[ch.key]];
+    }
+    $('#live').className = 'live';
+    $('#livetxt').textContent = '实时 · 通道健康与额度' + (s.lan ? ' · 局域网' : '');
+    render();
+  } catch (e) {
+    $('#live').className = 'live off';
+    $('#livetxt').textContent = '网关无响应';
+  }
+}
+
+function parseRun(md){
+  const cells = {};
+  const lines = md.split('\\n');
+  let cur = null;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const m = line.match(/^###\\s+(✅|⚪|❌|⚠️|🔇|💬)\\s+([^—-]+)(?:——\\s*(.*))?$/);
+    if (m) {
+      cur = {status: 'ok', count: 0, note: (m[3] || '').trim()};
+      if (m[1] === '⚪') { cur.status = 'ok'; cur.note = cur.note || '0 命中'; }
+      if (m[1] === '❌' || m[1] === '⚠️') { cur.status = 'fail'; cur.note = cur.note || '失败'; }
+      if (m[1] === '🔇') { cur.status = 'skip'; cur.note = cur.note || '跳过'; }
+      if (m[1] === '💬') { cur.note = cur.note || 'AI 摘要（非来源）'; }
+      const key = matchChannel(m[2].trim());
+      if (key) cells[key] = cur;
+      continue;
+    }
+    if (cur && /^- \\[/.test(line)) cur.count++;
+    const sum = line.match(/\\*\\*汇总\\*\\*：([\\s\\S]+)/);
+    if (sum) cur = cur; // 汇总行单独处理
+  }
+  let okc = 0, fail = 0, skip = 0;
+  Object.values(cells).forEach(c => {
+    if (c.status === 'ok') okc++;
+    else if (c.status === 'fail') fail++;
+    else skip++;
+  });
+  return {cells, stats: {ok: okc, fail, skip}};
+}
+
+function matchChannel(name){
+  const n = name.replace(/[（(].*$/, '').trim();
+  for (const ch of channels) {
+    if (ch.name.startsWith(n) || n.startsWith(ch.name.replace(/[（(].*$/, '').trim())) return ch.key;
+  }
+  return null;
+}
+
+async function run(){
+  const q = $('#q').value.trim();
+  if (!q) return;
+  const deep = $('#mode').value === 'deep';
+  const btn = $('#go'); btn.disabled = true; btn.textContent = '跑…';
+  $('#node-pill').textContent = '运行中';
+  $('#what').innerHTML = '<b>' + esc(q) + '</b> · ' + (deep ? 'deep 13 路' : '默认 9 路');
+  $('#node-q').textContent = q.length > 10 ? q.slice(0, 10) + '…' : q;
+  $('#node-tier').textContent = deep ? 'deep' : 'L2';
+  const t0 = Date.now();
+  try {
+    const r = await fetch(api('/api/search'), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({q, deep})
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '失败');
+    lastRun = Object.assign({q, deep}, parseRun(d.markdown));
+    $('#s-req').textContent = lastRun.stats.ok;
+    $('#s-fail').textContent = lastRun.stats.fail;
+    $('#s-skip').textContent = lastRun.stats.skip;
+    $('#node-pill').textContent = '完成';
+    $('#foot-note').textContent = '本轮耗时 ' + d.secs + 's · ' +
+      (deep ? 'deep 含 4 路限额通道（成功才记账）' : '默认档 9 路，7 路完全免 Key');
+    renderLog(d.markdown);
+    $('#src').innerHTML = md2html(d.markdown);
+    $('#srcbox').hidden = false;
+    render();
+  } catch (e) {
+    $('#node-pill').textContent = '失败';
+    $('#foot-note').textContent = '失败：' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '跑一轮';
+    loadState();
+  }
+}
+
+function renderLog(md){
+  const rows = [];
+  let cur = null;
+  for (const raw of md.split('\\n')) {
+    const line = raw.trimEnd();
+    const m = line.match(/^###\\s+(✅|⚪|❌|⚠️|🔇|💬)\\s+(.+)$/);
+    if (m) {
+      cur = {mark: m[1], name: m[2].replace(/——.*$/, '').trim(), items: [], note: ''};
+      const tail = m[2].match(/——\\s*(.+)$/);
+      if (tail) cur.note = tail[1];
+      rows.push(cur);
+      continue;
+    }
+    if (cur && /^- \\[/.test(line)) cur.items.push(line);
+  }
+  $('#log').innerHTML = rows.map(r => {
+    const cls = r.mark === '✅' || r.mark === '💬' ? 'ok' : (r.mark === '❌' || r.mark === '⚠️') ? 'fail' : '';
+    const desc = r.items.length ? r.items.length + ' 条' : (r.note || (r.mark === '⚪' ? '0 命中' : '跳过'));
+    return '<li class="' + cls + '"><span class="st"></span><span class="tx"><b>' +
+      esc(r.name) + '</b> ' + esc(desc) + '</span></li>';
+  }).join('');
+  $('#logbox').hidden = rows.length === 0;
+}
 
 function md2html(md){
   const out = [];
@@ -159,18 +439,17 @@ function md2html(md){
     const line = raw.trimEnd();
     if (!line.trim() || line.trim() === '---') continue;
     if (line.startsWith('### ') || line.startsWith('## ')) {
-      out.push('<h3>' + esc(line.replace(/^#+ /, '')) + '</h3>'); continue;
+      out.push('<h4>' + esc(line.replace(/^#+ /, '')) + '</h4>'); continue;
     }
     if (line.startsWith('- ')) {
       let t = line.slice(2);
       const m = t.match(/^\\[([^\\]]+)\\]\\(([^)]+)\\)(.*)$/);
       t = m ? '<a href="' + m[2] + '" target="_blank" rel="noreferrer">' + esc(m[1]) + '</a>' + esc(m[3])
             : esc(t);
-      out.push('<li>' + t.replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>') + '</li>');
+      out.push('<li>' + t + '</li>');
       continue;
     }
-    let cls = '';
-    if (line.includes('🔇') || line.includes('⚪')) cls = 'muted';
+    let cls = 'note';
     if (line.includes('⚠️') || line.includes('❌')) cls = 'warn';
     if (line.startsWith('**汇总**') || line.startsWith('**通道健康**') || line.startsWith('**下一步**')) cls = 'sum';
     out.push('<div class="' + cls + '">' + esc(line).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>') + '</div>');
@@ -178,66 +457,12 @@ function md2html(md){
   return out.join('');
 }
 
-let firstPaint = true;
-async function refresh(){
-  try {
-    const s = await (await fetch(api('/api/state'))).json();
-    $('#dot').className = 'dot';
-    $('#head').textContent = s.channels.length + ' 路通道 · ' + s.quota.length + ' 个限额账本' +
-      (s.lan ? ' · 局域网模式' : '');
-    $('#chans').innerHTML = s.channels.map(c => {
-      const st = c.streak_fail >= 3 ? ['p-bad','已停用'] : c.streak_fail > 0 ? ['p-warn','有失败']
-               : c.last_ok ? ['p-ok','正常'] : ['p-idle','未使用'];
-      return '<tr><td>' + esc(c.name) + '</td><td class="tier sub">' + c.tier + '</td>' +
-             '<td><span class="pill ' + st[0] + '">' + st[1] + '</span></td>' +
-             '<td class="n">' + c.streak_fail + '</td>' +
-             '<td class="sub">' + (c.last_ok ? c.last_ok.slice(5,16).replace('T',' ') : '·') + '</td></tr>';
-    }).join('');
-    $('#quota').innerHTML = s.quota.map(q => {
-      const pct = q.limit ? Math.min(100, q.used / q.limit * 100) : 0;
-      const k = pct > 85 ? 'bad' : pct > 70 ? 'warn' : '';
-      return '<tr><td>' + esc(q.svc) + '</td><td class="n">' + q.used +
-             (q.limit ? ' / ' + q.limit : '') + '</td><td class="n sub">' + esc(q.official) + '</td></tr>' +
-             '<tr><td colspan="3" style="padding:0 6px 8px"><div class="bar"><i class="' + k +
-             '" style="width:' + pct + '%"></i></div></td></tr>';
-    }).join('');
-    $('#qmeta').textContent = s.official_at
-      ? '官方校准 ' + s.official_at.slice(0,16).replace('T',' ') : '尚未校准';
-  } catch (e) {
-    $('#dot').className = 'dot bad';
-    $('#head').textContent = '网关无响应';
-  }
-  firstPaint = false;
-}
-
-async function run(){
-  const q = $('#q').value.trim();
-  if (!q) return;
-  const btn = $('#go'); btn.disabled = true; btn.textContent = '跑…';
-  const t0 = Date.now();
-  try {
-    const r = await fetch(api('/api/search'), {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({q, deep: $('#mode').value === 'deep'})
-    });
-    const d = await r.json();
-    const out = $('#out');
-    out.innerHTML = d.ok ? md2html(d.markdown)
-      : '<div class="bad">失败：' + esc(d.error || '未知错误') + '</div>';
-    out.classList.remove('fresh'); void out.offsetWidth; out.classList.add('fresh');
-    $('#timing').textContent = '耗时 ' + ((Date.now()-t0)/1000).toFixed(1) + 's（脚本 ' + d.secs + 's）';
-  } catch (e) {
-    $('#out').innerHTML = '<div class="bad">请求失败：' + esc(e) + '</div>';
-  } finally {
-    btn.disabled = false; btn.textContent = '跑一轮';
-    refresh();
-  }
-}
-
 $('#go').onclick = run;
 $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
-refresh();
-setInterval(refresh, 5000);
+$('#refresh').onclick = loadState;
+window.addEventListener('resize', () => drawWires());
+loadState();
+setInterval(loadState, 5000);
 </script></body></html>
 """
 
@@ -328,7 +553,6 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _allowed(self):
-        """--lan 模式：源 IP 必须在白名单且 key 匹配；只绑回环时全放行。"""
         if not LAN:
             return True
         try:
@@ -366,6 +590,9 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._send(400, '{"error":"bad json"}', "application/json")
         self._send(200, json.dumps(search(body), ensure_ascii=False), "application/json")
+
+
+ALLOWED = [ipaddress.ip_network(n) for n in ("127.0.0.0/8", "192.168.5.0/24", "10.7.0.0/24")]
 
 
 def main(argv):
