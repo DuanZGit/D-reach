@@ -70,6 +70,7 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 | 工具 `d_reach` | 并发检索：`query` + `profile`(auto/quick/base/deep) + `channels` + `detail`(brief/full) |
 | 工具 `d_reach_fetch` | 抓单个 URL，自动在 **curl → TinyFish → Jina → BrightData** 四档间降级，返回干净正文 |
 | 工具 `d_reach_quota` | 额度与通道健康；`refresh=true` 顺带跑官方校准 |
+| 工具 `d_reach_social` | B站/小红书：不传参=登录态体检，传 platform+query 才搜；失效时给修复命令 |
 | 命令 `/reach` `/reach-deep` | 交互式跑一轮，结果只弹通知 |
 
 **profile 就是分级路由**，默认 `auto`：

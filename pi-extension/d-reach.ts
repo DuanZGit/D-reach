@@ -513,6 +513,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
 	pi.registerTool(searchTool);
 	pi.registerTool(fetchTool);
 	pi.registerTool(quotaTool);
+	pi.registerTool(socialTool);
 
 	const runCommand = async (args: string, ctx: any, profile: Profile) => {
 		const query = args.trim();
@@ -537,3 +538,155 @@ export default function dReachExtension(pi: ExtensionAPI) {
 		handler: (args, ctx) => runCommand(args, ctx, "deep"),
 	});
 }
+
+// ---------------------------------------------------------------- 社交平台
+
+/**
+ * 登录态是这类通道的命门：cookie 过期后 CLI 会回 not_authenticated，
+ * 但原始报错对模型毫无指导意义。所以这里先 whoami 探活，再决定能不能搜，
+ * 失败时直接给「去哪刷新」而不是把 CLI 错误原样抛回去。
+ */
+const SOCIAL = {
+	bili: {
+		bin: "bili",
+		whoami: ["bili", "whoami"],
+		search: (q: string, n: number) => ["bili", "search", q, "--type", "video", "-n", String(n), "--json"],
+		authFile: join(homedir(), ".bilibili-cli", "credential.json"),
+		hint: "bili login（扫码）或按 references/social.md 手工写 credential.json",
+	},
+	xhs: {
+		bin: "xhs",
+		whoami: ["xhs", "whoami"],
+		search: (q: string, n: number) => ["xhs", "search", q, "-n", String(n), "--json"],
+		authFile: join(homedir(), ".xiaohongshu-cli", "cookies.json"),
+		hint: "xhs login 重新扫码；cookie 约 30 天失效",
+	},
+} as const;
+
+type SocialPlatform = keyof typeof SOCIAL;
+
+async function probeSocial(p: SocialPlatform) {
+	const meta = SOCIAL[p];
+	let installed = true;
+	try {
+		await run(meta.bin, ["--version"], { timeout: 6000 });
+	} catch {
+		installed = false;
+	}
+	if (!installed) return { platform: p, state: "missing" as const, detail: `${meta.bin} 未安装` };
+
+	let authFileAge: string | null = null;
+	try {
+		const { stdout } = await run("stat", ["-c", "%y", meta.authFile], { timeout: 5000 });
+		authFileAge = stdout.trim().slice(0, 10);
+	} catch {
+		/* 文件不存在也算信息 */
+	}
+
+	try {
+		const { stdout } = await run(meta.whoami[0], meta.whoami.slice(1), { timeout: 25_000 });
+		const authed = /ok:\s*true/.test(stdout) && !/not_authenticated/.test(stdout);
+		return {
+			platform: p,
+			state: authed ? ("ok" as const) : ("expired" as const),
+			authFileAge,
+			detail: authed ? "登录态有效" : "登录态失效（not_authenticated）",
+		};
+	} catch (e) {
+		// CLI 在未登录时通常用非 0 退出码，真因在 stdout 里，别把 "Command failed" 当结论
+		const out = String((e as { stdout?: string })?.stdout ?? "");
+		if (/not_authenticated/.test(out)) {
+			return { platform: p, state: "expired" as const, authFileAge, detail: "登录态失效（not_authenticated）" };
+		}
+		if (/ok:\s*true/.test(out)) {
+			return { platform: p, state: "ok" as const, authFileAge, detail: "登录态有效" };
+		}
+		return {
+			platform: p,
+			state: "error" as const,
+			authFileAge,
+			detail: `探活失败：${e instanceof Error ? e.message.slice(0, 60) : "未知"}`,
+		};
+	}
+}
+
+const socialTool = defineTool({
+	name: "d_reach_social",
+	label: "d-reach 社交平台",
+	description:
+		"B站 / 小红书 的登录态体检与内容搜索。不传 platform 只看状态（哪些能用、cookie 多久没刷新）；" +
+		"传 platform + query 才真的搜。登录态失效时会直接告诉你该跑哪条命令，不会把 CLI 原始报错丢回来。" +
+		"Twitter/X 目前本机没装 CLI，返回缺失。",
+	parameters: Type.Object({
+		platform: Type.Optional(
+			Type.Union([Type.Literal("bili"), Type.Literal("xhs")], { description: "不传 = 只体检" }),
+		),
+		query: Type.Optional(Type.String({ description: "搜索关键词；传了才会搜" })),
+		limit: Type.Optional(Type.Number({ description: "返回条数，默认 8，最多 20" })),
+	}),
+
+	async execute(_id, params) {
+		const platforms = params.platform ? [params.platform] : (Object.keys(SOCIAL) as SocialPlatform[]);
+		const probes = await Promise.all(platforms.map(probeSocial));
+
+		const lines: string[] = [];
+		for (const pr of probes) {
+			const meta = SOCIAL[pr.platform];
+			const tail = pr.authFileAge ? ` · 凭据文件 ${pr.authFileAge}` : "";
+			lines.push(`- ${pr.platform}: ${pr.detail}${tail}`);
+			if (pr.state === "expired" || pr.state === "missing" || pr.state === "error") {
+				lines.push(`  修复：${meta.hint}`);
+			}
+		}
+
+		if (!params.query) {
+			const usable = probes.filter((p) => p.state === "ok").map((p) => p.platform);
+			lines.push("", usable.length ? `可直接搜：${usable.join(", ")}` : "当前没有可用的社交通道");
+			return { content: [{ type: "text", text: lines.join("\n") }], details: { probes } };
+		}
+
+		const target = probes.find((p) => p.platform === params.platform);
+		if (!target || target.state !== "ok") {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `${lines.join("\n")}\n\n登录态不可用，换个通道或先修登录态再搜。`,
+					},
+				],
+				isError: true,
+			};
+		}
+
+		const n = Math.min(Math.max(params.limit ?? 8, 1), 20);
+		const meta = SOCIAL[target.platform];
+		try {
+			const { stdout } = await run(meta.bin, meta.search(params.query, n).slice(1), {
+				timeout: 40_000,
+				maxBuffer: 4 << 20,
+			});
+			let rendered = stdout.trim();
+			try {
+				const parsed = JSON.parse(rendered) as { data?: unknown };
+				rendered = "```json\n" + JSON.stringify(parsed.data ?? parsed, null, 2).slice(0, 6000) + "\n```";
+			} catch {
+				/* 非 JSON 就原样给 */
+			}
+			return {
+				content: [{ type: "text", text: `[${target.platform}] 搜索「${params.query}」\n\n${rendered}` }],
+				details: { platform: target.platform, query: params.query, limit: n },
+			};
+		} catch (e) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `[${target.platform}] 搜索失败：${e instanceof Error ? e.message.slice(0, 200) : "未知"}。` +
+							`\n如果是风控/限流，隔几分钟再试；登录态问题是另一类，先跑 d_reach_social 体检。`,
+					},
+				],
+				isError: true,
+			};
+		}
+	},
+});
