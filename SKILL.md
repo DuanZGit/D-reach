@@ -3,7 +3,7 @@ name: d-reach
 description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
   GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、BrightData、Firecrawl、
-  Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
+  Jina Reader、gh CLI、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
   **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 9 路（~5s）；
   L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
@@ -218,8 +218,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 | 读一个 URL（不反爬） | `curl` 直取 ✅免 | TinyFish `fetch_content`（$0，真渲染） | Jina |
 | 读一个 URL（反爬/需 JS） | TinyFish `fetch_content`（$0） | BrightData ⏱ | Jina ⏱ |
 | 批量抓取 | BrightData 循环（≤10）⏱ | TinyFish `fetch_content`（10 URL/次，$0） | Jina ⏱ |
-| GitHub 仓库/代码 | gh CLI ✅免 | DeepWiki MCP ✅免 | Gitee |
-| 仓库语义问答 | DeepWiki `ask_wiki_question` ✅免 | gh CLI 读源码 | —（连不上先重试：pi 的 MCP 有 ~15s 失败退避） |
+| GitHub 仓库/代码 | gh CLI ✅免（`gh search code` / `gh api` 读文件） | Gitee ✅免（国内镜像） | — |
 | B站 | bili CLI（需登录态） | TinyFish `run_web_automation` | — |
 | 小红书 | xhs CLI（需登录态） | TinyFish `run_web_automation` | — |
 | Twitter/X | twitter-cli（需登录态，本机 `twitter` 是 npm 同名假货） | TinyFish `run_web_automation` | — |
@@ -254,7 +253,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 > 另：新浪财经/腾讯新闻类页面常需 JS 渲染，裸 curl 只得骨架，直接换 TinyFish `fetch_content`。
 
 > ⚠️ **000 ≠ 通道挂了**（2026-09-22 复检教训）：上表之外，`github.com` / `api.stackexchange.com` /
-> `r.jina.ai` / DeepWiki MCP 都曾被误判 000 而其实正常——**探活只认 GET + 重试 1 次**，
+> `r.jina.ai` / `mcp.deepwiki.com` 都曾被误判 000 而其实正常——**探活只认 GET + 重试 1 次**，
 > **绝不用 `curl -I`**（HEAD 不被支持时会挂死或回 405/406，假报“挂了”）。
 
 ### 通道现状（2026-09-05 实测）
@@ -264,7 +263,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 > 改成 `nameserver 223.5.5.5` / `8.8.8.8` 立刻全通，不需要任何隧道、中继或 hosts 钉 IP
 > （duanz.xin 是 DDNS，IP 每天变，钉了隔天就砖）。
 
-- ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
+- ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、bili CLI。
 - ✅ `xhs`：2026-09-05 已重新登录（search / comments 实测通）。**cookie 会周期性过期**，
   报 `not_authenticated / Session expired` 时按下面恢复 —— 注意 `xhs login --qrcode` **走不通**：
   扫码和确认都能过，但最后一步 `_complete_confirmed_session` 会被风控要验证码
@@ -330,7 +329,7 @@ curl -s --max-time 30 "https://r.jina.ai/https://example.com/article"
 gh search repos "query" --sort stars --limit 10
 ```
 
-编程文档 / 论文 / DeepWiki / gh 读文件的写法在 `references/scrape.md`、`references/dev.md`。
+编程文档 / 论文 / gh 读文件的写法在 `references/scrape.md`、`references/dev.md`。
 
 ## B站 / 小红书 铁律（踩过的坑，别再来一遍）
 
@@ -371,7 +370,7 @@ python3 $SKILLS/d-reach/scripts/quota.py reset brightdata
 
 **留 30% 裕度**：日线和月线都按 70% 设线，剩下 30% 留给当天突发任务。
 免费通道（Firecrawl Developer / TinyFish / StackExchange / HN / OpenAlex / Crossref / 掘金 /
-SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 深挖时优先铺满它们**；
+SegmentFault / 36氪 / 豆瓣 / gh CLI）**不限量、不记账 → 深挖时优先铺满它们**；
 已除名：cn.bing（投毒，已从 fanout 移除）、V2EX 搜索（退役）、博客园（退役）、browser_use（本机不存在）。
 这才是「用足日额度」的正确姿势。
 
@@ -381,7 +380,7 @@ SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 
 ⏱ = 两段式记账：`fanout` 先 `quota.py check`，**请求成功（HTTP 200）才 `use` 真扣，失败不扣**。
 手动调用时同样如此。例外：**百度千帆由它自己的计数器记账**（别双扣）；
 Firecrawl 的两个 Index REST 端点免费不记账，只有走 SDK 抓取才 `use firecrawl`；
-gh / yt-dlp / DeepWiki / V2EX 免费无限，不记账。
+gh / yt-dlp 免费无限，不记账。
 **Jina 与 Exa 同样是 ⏱ 通道，别因为「感觉免费」就跳过记账** —— 实测近 30 天有 25 次 Jina、
 4 次 Exa 调用未记账，额度计数因此长期失真。
 BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDATA_APITOKEN" https://api.brightdata.com/account/usage`。
@@ -400,7 +399,7 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 | [references/search.md](references/search.md) | 搜索通道完整参数、**查询改写矩阵与分档调用序列** |
 | [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS |
 | [references/social.md](references/social.md) | 微博 / V2EX / Reddit / 公众号 / 豆瓣 / 知乎 |
-| [references/dev.md](references/dev.md) | gh CLI / DeepWiki / StackExchange / 掘金 完整用法 |
+| [references/dev.md](references/dev.md) | gh CLI / StackExchange / 掘金 完整用法 |
 | [references/video.md](references/video.md) | YouTube / B站 / 播客字幕 |
 | [references/finance.md](references/finance.md) | 雪球 / 巨潮资讯 / A股公告 |
 | [extensions/d-reach-xhs/SKILL.md](extensions/d-reach-xhs/SKILL.md) | 处理小红书笔记链接时 |

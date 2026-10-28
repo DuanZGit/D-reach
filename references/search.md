@@ -95,7 +95,7 @@ Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Cro
 | 中文综合回答 | 百度千帆（生成式，非来源） | 1 | ✅ 默认档（标 💬） |
 | 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 | 1-2 | ❌ 需手打 |
 | 书影音评分 | 豆瓣 `window.__DATA__` | 1 | ❌ 需手打 |
-| 代码/仓库 | gh CLI search / DeepWiki `ask_question` | 1-3 | ❌ 需手打 |
+| 代码/仓库 | gh CLI search / gh api 读文件 | 1-3 | ❌ 需手打 |
 | A 股公告 | 巨潮 cninfo | 1-2 | ❌ 需手打 |
 | 微信公众号 | weixin.sogou.com | 1 | ❌ 需手打 |
 

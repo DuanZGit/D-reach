@@ -51,7 +51,7 @@ LIMITS = {
 # 补上一直在用却没列进来的 Firecrawl Developer Index 与 TinyFish（$0/次）。
 FREE_CHANNELS = ("Firecrawl Developer Index", "TinyFish search/fetch", "StackExchange",
                  "HN Algolia", "OpenAlex", "Crossref", "掘金", "SegmentFault",
-                 "36氪/InfoQ/澎湃/界面", "豆瓣", "gh CLI", "DeepWiki")
+                 "36氪/InfoQ/澎湃/界面", "豆瓣", "gh CLI")
 
 
 def _soft(limit):
