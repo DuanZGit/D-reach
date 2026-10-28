@@ -145,6 +145,22 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | ScrapeCreators（**仅手打，fanout 不读**） | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
 | LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
 
+## 可视化网关（可选，人看状态用）
+
+```bash
+python3 scripts/gateway.py --port 3426     # 或直接 systemctl --user start d-reach-gateway
+```
+
+浏览器开 `http://127.0.0.1:3426/`：左边通道健康（连败几次、最后成功时间），右边本地额度 vs 官方剩余，
+底部能直接跑一轮搜索。pi 可以不用 CLI 直接调 API：
+
+```
+GET  /api/state     → 通道 + 额度状态（JSON）
+POST /api/search    → {"q":"...","deep":true,"on":"hn,exa"} → {ok, markdown, secs}
+```
+
+只绑回环地址、无鉴权，**不要往公网映射**；要手机看走 Caddy + 鉴权（同 sev 面板那套）。
+
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash

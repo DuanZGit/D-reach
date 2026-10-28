@@ -44,6 +44,7 @@ bash scripts/fanout.sh --list          # 应列出所有通道名
 bash scripts/fanout.sh "测试查询"       # 默认档 9 路，约 5 秒
 python3 scripts/quota.py budget        # 看限额通道还剩多少
 python3 scripts/test_quota.py          # 记账逻辑自检（应打印「自检通过」）
+python3 scripts/gateway.py --port 3426  # 可选：可视化网关，浏览器开 http://127.0.0.1:3426/
 ```
 
 默认档 9 路里有 7 路**完全不需要 key**（Crossref 遇中文自动跳过），所以第一次跑就该有结果。
