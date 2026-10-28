@@ -32,6 +32,7 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 | `gh` CLI | 否 | GitHub 仓库/代码搜索（`gh search`） | `brew install gh` / `apt install gh` |
 | `yt-dlp` | 否 | 视频字幕（B站/YouTube） | `pipx install yt-dlp` |
 | `bili` / `xhs` / `twitter-cli` | 否 | 社交平台登录态抓取 | 见 `references/social.md` |
+| `opencli` | 否 | 电商/雪球等适配器（需 Chrome 桥） | `npm i -g @jackwener/opencli`（本机 2.0.2；2.x 默认输出 JSON，`-f yaml` 仍可用） |
 
 不需要 Node、不需要 npm 安装、不需要任何 Python 第三方包。
 
@@ -97,15 +98,16 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 
 | 服务 | 官方托管端点 | 认证 | 本地 stdio 方式 | 关键工具 | 本机状态 |
 | --- | --- | --- | --- | --- | --- |
-| Exa | `https://mcp.exa.ai/mcp` | 免 key（限速）/ OAuth 用 `?login` / header `x-api-key` | `npx -y exa-mcp-server` + `EXA_API_KEY` | `web_search_exa`、`web_fetch_exa`（实测 2 个） | 未挂 |
+| Exa | `https://mcp.exa.ai/mcp` | 免 key（限速）/ OAuth 用 `?login` / header `x-api-key` | `npx -y exa-mcp-server` + `EXA_API_KEY` | `web_search_exa`、`web_fetch_exa`、`agent_run`（实测 3 个，带 key 会多出 agent_run） | **已挂** |
 | Firecrawl | `https://mcp.firecrawl.dev/v2/mcp`（Bearer key）<br>`https://mcp.firecrawl.dev/v2/mcp-oauth`（OAuth，无需 key） | `Authorization: Bearer $FIRECRAWL_API_KEY` 或浏览器 OAuth | 见官方 `mcp-server/local` 文档 | 31 个（`firecrawl_search`/`scrape`/`map`…） | 未挂 |
 | TinyFish | `https://agent.tinyfish.ai/mcp` | OAuth（`pi mcp auth tinyfish`）或 `X-API-Key` header | — | search、fetch_content、monitor、run_web_automation | **已挂** |
 | BrightData | `https://mcp.brightdata.com/mcp?token=<token>`（SSE 版：`/sse?token=`） | token 直接放 query | `npx @brightdata/mcp` + `API_TOKEN` | 31 个（`search_engine`/`scrape_as_markdown`…） | 未挂 |
 | Jina | `https://mcp.jina.ai/v1` | header `Authorization: Bearer $JINA_API_KEY`（可省略，限额更紧） | `npx -y mcp-remote https://mcp.jina.ai/v1` | 12 个（`read_url`/`search_web`/`search_arxiv`/`extract_pdf`） | 未挂 |
-| LangSearch | `https://mcp.langsearch.com/mcp`（Streamable HTTP，**路径必须带 `/mcp`**） | `Authorization: Bearer <LangSearch API key>` | — | 1 个（`web_search`） | 未挂 |
+| LangSearch | `https://mcp.langsearch.com/mcp`（Streamable HTTP，**路径必须带 `/mcp`**） | `Authorization: Bearer <LangSearch API key>` | — | 1 个（`web_search`） | **已挂** |
 | DeepWiki | `https://mcp.deepwiki.com/mcp` | **免 key** | — | `ask_wiki_question`、`read_wiki_contents`、`read_wiki_structure` | **已挂** |
 
 > 上表的端点、工具数都是 2026-10-26 用本机 key 实测 `tools/list` 拿到的，不是抄文档。
+> 本机 `mcp.json` 已挂：deepwiki / tinyfish / exa / langsearch / rea（`pi mcp list` 全部 connected）。
 > 需要带 session 的（BrightData / TinyFish）先 `initialize` 拿 `Mcp-Session-Id`，后续请求要带上，否则 400。
 
 客户端配置样例（支持标准 `mcpServers` 的客户端通用）：
