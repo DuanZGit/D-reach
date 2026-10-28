@@ -660,3 +660,7 @@ print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
 PY
+
+# 跑完自动校准官方额度（本地计数 ≠ 厂商剩余；校准结果写入 quota.json 的 _official 段）
+# 失败只写 stderr，不阻塞、不影响本轮结果。D_REACH_SKIP_PROBE=1 可关。
+[ "${D_REACH_SKIP_PROBE:-0}" = "1" ] || python3 "$DIR/quota_probe.py" --quiet 2>&1 >/dev/null | sed 's/^/  /' || true

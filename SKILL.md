@@ -376,6 +376,8 @@ SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 
 这才是「用足日额度」的正确姿势。
 
 计数文件 `~/.agent-reach/quota.json`，跨日/跨月自动归零。
+`fanout.sh` 结束会自动跑 `quota_probe.py --quiet` 做**官方额度校准**（写 `_official` 段，
+10 分钟内复用）。能查的只有 Firecrawl 与 TinyFish；其余靠本地计数，别把本地数字当厂商余额。
 ⏱ = 调用前 `quota.py use <svc>`。例外：**百度千帆由它自己的计数器记账**（别双扣）；
 Firecrawl 的两个 Index REST 端点免费不记账，只有走 SDK 抓取才 `use firecrawl`；
 gh / yt-dlp / DeepWiki / V2EX 免费无限，不记账。
