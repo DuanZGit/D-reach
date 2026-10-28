@@ -145,7 +145,7 @@ A股公告       → 巨潮资讯 cninfo           → 东方财富
 强反爬        → BrightData → Jina         → browser_use
 ```
 
-> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 10 路 + `--deep` 4 路）
+> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 9 路 + `--deep` 4 路）
 > 一次并发打完，**别逐条手 curl** —— 实测 3 路串行 2.95s vs 并行 1.30s。
 
 > **记账规则**：本文件所有通道 **免 Key 且不限量 → 不执行 `quota.py use`**。
