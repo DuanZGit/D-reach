@@ -41,7 +41,7 @@ LIMITS = {
     "firecrawl":   (1000, 200),      # Free plan: 1,000 credits/月，每月重置、不结转（官方 pricing）；论文端点免费不计这里
     "langsearch":  (None, 50),      # 官方只给“daily token 额度”（00:00 UTC 重置、起始 5 RPS），无明确请求数；50=本技能自设保守线
     "jina_reader": (None, 300),      # 免 key 约 20 RPM（按 IP 限速），有 key 提到约 200 RPM；300/日 = 自设保守线
-    "browser_use": (None, 100),    # Minis 内置
+    # browser_use 已移除：本机没有这个工具（pi 未注册、CLI 不存在），记了也是假账
     "xhs":         (None, 200),    # 登录态免费，防风控
     "bili":        (None, 200),
     "twitter":     (None, 100),
@@ -230,6 +230,26 @@ def main(argv):
             code, msg = _try(d, svc, n, cmd == "use")
             print(msg)
             return code
+        if cmd == "refund":
+            # 两段式记账的另一半：请求失败时把先占的额度退回来
+            svc = argv[2] if len(argv) > 2 else ""
+            if not svc:
+                print("usage: quota.py refund <service> [count]")
+                return 2
+            try:
+                n = int(argv[3]) if len(argv) > 3 else 1
+            except ValueError:
+                print(f"count 必须是整数：{argv[3]!r}")
+                return 2
+            if svc not in LIMITS:
+                print(f"{svc}: 无限额，无需退款")
+                return 0
+            b = _bucket(d, svc)
+            b["monthly"] = max(b["monthly"] - n, 0)
+            b["daily"] = max(b["daily"] - n, 0)
+            _save(d)
+            print(f"refund {svc} {n} → 月 {b['monthly']} / 日 {b['daily']}")
+            return 0
         if cmd == "reset":
             svc = argv[2] if len(argv) > 2 else None
             if svc:
@@ -238,8 +258,8 @@ def main(argv):
                 for k in LIMITS:
                     d.pop(k, None)
             _save(d)
-        print(f"reset {svc if svc else 'all'}")
-        return 0
+            print(f"reset {svc if svc else 'all'}")
+            return 0
     print(f"unknown command: {cmd}")
     return 2
 

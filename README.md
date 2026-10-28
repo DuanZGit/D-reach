@@ -7,7 +7,7 @@ gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browse
 
 **设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
 代码只有两个小件：`scripts/quota.py`（约 200 行）记免费额度防越线，
-`scripts/fanout.sh`（一条命令并发铺开默认档 10 路 + `--deep` 4 路限额通道）。
+`scripts/fanout.sh`（一条命令并发铺开默认档 9 路 + `--deep` 4 路限额通道）。
 
 ## 安装
 
@@ -42,7 +42,7 @@ python3 scripts/quota.py reset brightdata
 调用方式全部在 [`SKILL.md`](./SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
 
 ```bash
-# L2 起别逐条手打 —— 一条命令并发铺开（默认档 10 路，仅千帆/TinyFish 要 key，~5s）
+# L2 起别逐条手打 —— 一条命令并发铺开（默认档 9 路，仅千帆/TinyFish 要 key，~5s）
 bash scripts/fanout.sh "ollama vs vllm"
 # L3 深调研：追加 LangSearch / Exa / Firecrawl-Research / BrightData（~12s，自动记账）
 bash scripts/fanout.sh "ollama vs vllm" --deep

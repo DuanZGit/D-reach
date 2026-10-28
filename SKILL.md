@@ -4,7 +4,7 @@ description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
   GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、BrightData、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
-  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 10 路（~5s）；
+  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 9 路（~5s）；
   L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
@@ -37,9 +37,9 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：14 条路里 10 路走默认档（8 路完全免 key、2 路需 key 但 $0/次或自带免费额度）、4 路限额通道月余量 >96%
+> 理由很直白：13 条路里 9 路走默认档（7 路完全免 key、千帆需配套技能、TinyFish 需 key 但 $0/次）、4 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
-> 例外只有 L1 点查（2 路互证，`--on bing,<最相关一路>`）。
+> 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 
 把"用户想找信息"翻译成"用哪个通道、怎么调用"。**路由表由你（agent）直接执行**，
 没有中间脚本；唯一的代码是 `scripts/quota.py`，它只负责记额度。
@@ -48,10 +48,10 @@ upstream:
 
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
-   L2 起一律走它：**默认档 10 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
+   L2 起一律走它：**默认档 9 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
    Firecrawl-Research / BrightData-Google（约 10-15s）。**别一条一条串行试** ——
    实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
-   L1 点查可只跑两路互证：`fanout.sh "<query>" --on bing,<最相关一路>`
+   L1 点查可只跑两路互证：`fanout.sh "<query>" --on hn,<最相关一路>`
    想知道单路返回什么/排查某通道时，用 `--on <通道名>` 隔离测试（通道名见 fanout.sh 头注释）
 3. **记账**：限额通道（⏱）调用前 `python3 scripts/quota.py use <svc>`
    - exit 0 → 正常用
@@ -104,7 +104,7 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSe
 术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
 再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
 
-**免费优先**：`fanout.sh` 默认档一次并发 **10 路**（cn.bing⚠️已判死 / Firecrawl Developer /
+**免费优先**：`fanout.sh` 默认档一次并发 **9 路**（Firecrawl Developer /
 StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆）—— 它们不限量、不记账，
 **闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research / BrightData 是限额/计 token 通道，
 **L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
@@ -148,11 +148,16 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：10 路并发（~5s，8 路免 key）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：9 路并发（~5s，7 路免 key）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/BrightData（~12s）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing,hn  # 只跑指定路（点名 deep 通道会自动开 deep）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --force       # 忽略健康状态强跑（复检用）
 ```
+
+**通道健康状态**：每轮结果写进 `~/.agent-reach/channels.json`（ok / fail / streak_fail / last_fail_at）。
+连续失败 ≥3 次的路，下一轮**默认不发请求**，直接标 `🔇 连续失败 N 次`；要复检加 `--force`，
+或用 `--on <key>` 显式点名。跳过不等于失败 —— 本轮没请求的通道不计入连败。
 
 **输出怎么读**（每种标记对应不同动作，别混）：
 
@@ -174,18 +179,12 @@ bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几
 博客园 `zzk.cnblogs.com`（302→zzkx 返回 5.7KB 壳页、0 结果）、
 V2EX `/search?q=`（302→`/go/search`，返回与 query 无关的节点帖子 —— **假结果比无响应更毒**）。
 
-**cn.bing `/search?q=` —— 2026-10-05 判定失效（投毒，不是挂了）**：
-HTTP 200、结果页结构完好、`<h2><a>` 抓得到 10 条，但**内容与 query 完全无关**。同日实测：
-查「意式咖啡豆 中深烘 拿铁」→ 法语「巴西米饭做法」（recettes-culinaires.fr / fr.wikihow）；
-查「espresso coffee bean medium dark roast」→「espresso（一种特浓咖啡）_百度百科」；
-另一轮中文 query → 繁体鸡汤食谱（愛料理）/ 乌尔都语诗歌站。
-**同一 query 稳定复现**，且**加随机 `&_=` 参数 / `Cache-Control: no-cache` / 换移动端 UA / 换 `mkt=zh-CN` 全部无效**
-→ 判定为服务端反爬投毒，既不是缓存串号也不是解析器 bug。
-**假结果比无响应更毒**（同 V2EX 教训：它伪装成 ✅ 有结果，比超时更容易骗过收尾自查）。
-处置：
-- `r_bing` 已加**相关性闸门**（标题与 query 的词/二字片段重合 <2 个即剔除；全被剔除则输出
-  `⚠️ 结果与查询完全无关（疑似反爬投毒）`，不再打 ✅）。闸门只防伪不补能力 —— **bing 这一路视为常年不可用**。
-- 路由表内所有 `❌cn.bing（投毒）` 单元格一律不要走；中文/时效搜索压 LangSearch + 千帆 + BrightData。
+**cn.bing 已从代码与路由表移除（2026-10-05 判定投毒）**：
+HTTP 200、结果页结构完好、能抓到 10 条，但**内容与 query 完全无关**（查咖啡豆返回法语食谱、
+查英文技术词返回百度百科、中文 query 返回乌尔都语诗歌站）。同 query 稳定复现，
+加随机参数 / no-cache / 换 UA / 换 mkt 全部无效 → 服务端投毒，不是解析器 bug。
+**假结果比无响应更毒**，所以这一路直接删掉，不给「再试一次」留口子。
+中文/时效搜索改用 LangSearch + 千帆 + BrightData。
 
 ## TinyFish 双接入（2026-10-08 落地）
 
@@ -202,40 +201,41 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 ## 路由表
 
-> **✅免 = 免 Key 且不限量，不记账；⏱ = 调用前先 `quota.py use <svc>`；⏱$0 = 需 Key 但按次免费（TinyFish：search / fetch_content 均 $0.00，不记账）**
+> **✅免 = 免 Key 且不限量，不记账；⏱ = 限额通道，`fanout` 自动两段式记账（先 `check`、请求成功才 `use` 真扣，失败不扣）；⏱$0 = 需 Key 但 $0/次（TinyFish search/fetch）**
 > 表内每行的 首选/备选/兜底 是**降级链**（首选挂了才走下一列），不是三选一；L2 起要多行同时开。
 > 完整国内通道实测清单（含不可达站点与替代链）见 **[references/cn-reach.md](references/cn-reach.md)**。
 
-| 意图 | 首选 | 备选 | 兜底 |
+| 意图 | 首选 | 次选 | 兜底 |
 |------|------|------|------|
-| 中文搜索 | 百度千帆（自带计数器） | ❌cn.bing（投毒） | BrightData ⏱ |
-| 英文/技术搜索 | **LangSearch ⏱**（`count=20`，$0 全功能：时效/限域/全文；cn.bing 已投毒勿用） | **TinyFish tf ⏱$0**（`domain_type`/`language`/`include_domains`/`purpose`） | Exa ⏱ |
-| 时效/限域检索 | LangSearch ⏱（`freshness` 日期/区间 + `include/excludeDomains`，`count=20`） | **TinyFish tf ⏱$0**（`recency_minutes` 分钟级新鲜度 + `after/before_date`，禁与 date 混用） | BrightData `&tbs` ⏱ |
-| 代码报错/排障 | **StackExchange API** ✅免 | Firecrawl Developer Index ✅免 | ❌cn.bing（投毒） |
-| 中文技术长尾 | **掘金 API + SegmentFault** ✅免（博客园已退役） | 百度千帆 | ❌cn.bing（投毒） |
-| 编程文档/issue | Firecrawl Developer Index ✅免 | Exa ⏱ | gh CLI ✅免 |
-| 学术论文 | **OpenAlex / Crossref ✅免 + Firecrawl Research ✅免**（官方：论文端点不耗 credits，只要 key） | Semantic Scholar ✅免 | Jina 读原文 ⏱ |
-| 公司/专有名词背景 | **千帆百科星图**（`dispatch knowledge` 200/日）+ 百度百科词条 | ❌cn.bing（投毒） | Exa ⏱ |
-| 图片/截图找来源 | 千帆相似图搜索（100/日） | 千帆智能识图（100/日） | ❌cn.bing（投毒） |
-| 概念科普补全 | 千帆秒懂百科（100/日，短视频脚本式讲解） | 百度百科词条 | —
-| 深度技术讨论 | **HN Algolia** ✅免 | V2EX ✅免 | ⚠️V2EX 搜索已退役 |
-| A股公告/披露 | **巨潮资讯 cninfo** ✅免 | gushen（雪球） | 东方财富 |
+| 中文综合/线索 | 百度千帆（AI 摘要，**不是来源**） | TinyFish search | LangSearch |
+| 英文/技术搜索 | **LangSearch**（`count=20`，限域/时效最强） | **TinyFish search**（$0/次） | Exa |
+| 代码报错/排障 | **StackExchange** ✅免 | Firecrawl Developer Index ✅免 | 掘金 / SegmentFault ✅免 |
+| 中文技术长尾 | **掘金 + SegmentFault** ✅免 | 百度千帆 | — |
+| 学术论文 | **OpenAlex + Crossref** ✅免 | Firecrawl Research ✅免（论文端点不耗 credits） | — |
+| 编程文档/issue | Firecrawl Developer Index ✅免 | Exa | gh CLI ✅免 |
+| 公司/人名背景 | 千帆百科星图（200/日，需手打 `dispatch`） | 百度百科词条 | Exa |
+| 深度技术讨论 | **HN Algolia** ✅免 | 掘金 / SegmentFault | — |
+| 读一个 URL（不反爬） | `curl` 直取 ✅免 | TinyFish `fetch_content`（$0，真渲染） | Jina |
+| 读一个 URL（反爬/需 JS） | TinyFish `fetch_content`（$0） | BrightData ⏱ | Jina ⏱ |
+| 批量抓取 | BrightData 循环（≤10）⏱ | TinyFish `fetch_content`（10 URL/次，$0） | Jina ⏱ |
+| GitHub 仓库/代码 | gh CLI ✅免 | DeepWiki MCP ✅免 | Gitee |
+| 仓库语义问答 | DeepWiki `ask_wiki_question` ✅免 | gh CLI 读源码 | —（连不上先重试：pi 的 MCP 有 ~15s 失败退避） |
+| B站 | bili CLI（需登录态） | TinyFish `run_web_automation` | — |
+| 小红书 | xhs CLI（需登录态） | TinyFish `run_web_automation` | — |
+| Twitter/X | twitter-cli（需登录态，本机 `twitter` 是 npm 同名假货） | TinyFish `run_web_automation` | — |
+| 微信公众号 | weixin.sogou.com ✅免（列表页 JS 拼装，拿不到标题就换 TinyFish fetch） | Exa 限域 + BrightData ⏱ | — |
+| A股公告 | 巨潮 cninfo ✅免 | gushen（雪球） | 东方财富（需手打站内搜索） |
 | 股票行情 | gushen 技能（雪球） | 百度千帆 | — |
-| 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 ✅免 | 百度千帆 | — |
-| 书影音评分 | 豆瓣 `window.__DATA__` ✅免 | 百度千帆 | — |
-| **普通网页/官方文档（不反爬）** | **直接 `curl` fetch ✅免**（JS 渲染站才用 `browser_use`） | Jina ⏱ | BrightData ⏱ |
-| JS 渲染/懒加载页抓取 | **TinyFish fetch_content ⏱$0**（真浏览器渲染，10 URL/次，`include/exclude_selectors` 裁边，`ttl` 控缓存） | BrightData ⏱ | Jina ⏱ |
-| 网页抓取（反爬） | BrightData ⏱ | Jina ⏱ | browser_use ⏱ |
-| 批量网页抓取 | BrightData（循环单抓，≤10）⏱ | Jina ⏱ | — |
-| GitHub 仓库/代码 | gh CLI（免费无限） | DeepWiki MCP | Gitee ✅免 |
-| 仓库语义问答 | DeepWiki MCP `ask_question` | gh CLI 读源码 | —（连不上先重试：**pi 的 MCP 有 ~15s 失败退避**，`fetch failed` 常是上轮失败缓存，不是服务死；见 dev.md）|
-| B站 | bili CLI ⏱ | browser_use ⏱（**不要 yt-dlp，会被 412 拦**） | — |
-| YouTube 字幕 | browser_use（yt-dlp 本机未跑通，见 video.md） | 隧道+cookies 的 yt-dlp | — |
-| 小红书 | xhs CLI ⏱ | browser_use ⏱ | — |
-| 微信公众号 | **weixin.sogou.com** ✅免 | Exa 限域 + BrightData ⏱ | — |
-| 微博 / 知乎 | browser_use ⏱（web 与 api 均 403 拦爬） | 千帆搜快照 | — |
-| Twitter/X | browser_use ⏱（本机 `twitter` 是 npm 同名假货，见下） | 装 Python 版 twitter-cli | — |
-| 需要登录的站点 | browser_use ⏱ | — | — |
+
+**已删除的通道（别再试）**
+- `cn.bing` —— 疑投毒，结果与 query 无关；已从 `fanout.sh` 移除
+- `V2EX` 搜索 —— 2026-09-25 起 `/search?q=` 302 到节点列表，返回假结果
+- 博客园 —— 302 后返回壳页
+- `browser_use` —— 本机没有这个工具（pi 未注册、CLI 不存在），原来的 7 处引用全部改成 TinyFish / BrightData
+
+**声明了但没有实现的能力（别按表找）**
+- 图片/截图找来源：千帆图片 API 只有清单没有执行器
+- YouTube 字幕：yt-dlp 本机未跑通，替代见 `references/video.md`
 
 ### 🔴 本环境不可达（DNS 通 ≠ 能连，别硬试）
 
@@ -247,11 +247,11 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 | 目标 | 现象 | 出路 |
 |---|---|---|
 | 京东搜索 `search.jd.com/Search?keyword=` | 302 → 风控页 `JDR_shields`（`-L --compressed` 也一样，返回 957B 验证脚本） | 住宅代理（BrightData 需 KYC）；或走榜单/快照 |
-| 知乎 `zhuanlan.zhihu.com` | 裸 curl 返回空壳（仅「让每一次点击都充满意义」）；**Jina Reader 也拿到「安全验证」页** | 千帆搜快照 / browser_use |
+| 知乎 `zhuanlan.zhihu.com` | 裸 curl 返回空壳（仅「让每一次点击都充满意义」）；**Jina Reader 也拿到「安全验证」页** | 千帆搜快照 / TinyFish fetch |
 | BrightData 抓知乎 | `bad_endpoint: Requested site is not available ... robots.txt`（无 KYC 的住宅模式被拒） | 做 KYC 后可用 |
 | B站字幕 `bili video -s` | 大量视频 `subtitle.available: false` —— **是视频本身没字幕，不是 CLI 坏**（bili 0.6.2 已是 PyPI 最新） | 改用 `--ai` 摘要 + `-c` 评论区 |
 
-> 另：新浪财经/腾讯新闻类页面常需 JS 渲染，裸 curl 只得骨架，直接换 `browser_use`。
+> 另：新浪财经/腾讯新闻类页面常需 JS 渲染，裸 curl 只得骨架，直接换 TinyFish `fetch_content`。
 
 > ⚠️ **000 ≠ 通道挂了**（2026-09-22 复检教训）：上表之外，`github.com` / `api.stackexchange.com` /
 > `r.jina.ai` / DeepWiki MCP 都曾被误判 000 而其实正常——**探活只认 GET + 重试 1 次**，
@@ -272,18 +272,18 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
   可用的是**借内置浏览器登录，再把 cookie 灌回 CLI**：
 
   ```bash
-  # 1) browser_use: set_user_agent desktop_chrome → navigate https://www.xiaohongshu.com/explore
+  # 1) TinyFish run_web_automation：打开 https://www.xiaohongshu.com/explore
   #    （移动端 UA 不发二维码，必须桌面版；模态框没自动弹就点侧栏「登录」）
   # 2) 把 img.qrcode-img 的截图区域裁出来给用户扫（dpr=4，坐标×4；必须补 ≥4 模块白边，
   #    否则扫码器因缺 quiet zone 拒识）。别手抄 base64 —— 会抄成垃圾。
-  # 3) 用户确认后：browser_use get_cookies keywords="web_session a1 webId gid"
+  # 3) 用户在自己浏览器 DevTools 里取 cookie（web_session / a1 / webId / gid）
   # 4) 写 ~/.xiaohongshu-cli/cookies.json（扁平结构，不是嵌套）：
   #    {"a1":…,"webId":…,"gid":…,"web_session":…,"saved_at":<unix秒>}  权限 600
   # 5) xhs status 验证 authenticated: true
   ```
 
 - ❌ `twitter`：PATH 上的是 npm `twitter-cli@0.0.2`（filter stream 玩具），**不是**文档里的 Python v0.8.5。任何子命令都只打印一行 usage 并 **exit 0** —— 静默假成功，别当成"没结果"。要真用得 `pipx install twitter-cli` 并确认 `which twitter` 不再指向 `/usr/local/bin`。
-- ⚠️ Reddit 公开 JSON：数据中心 IP 被拉黑，返回 **200 + "Blocked" HTML**（不是 403），别误读成空结果 → 换 browser_use / BrightData。
+- ⚠️ Reddit 公开 JSON：数据中心 IP 被拉黑，返回 **200 + "Blocked" HTML**（不是 403），别误读成空结果 → 换 TinyFish fetch / BrightData。
 
 ## 通道命令
 
@@ -372,13 +372,14 @@ python3 $SKILLS/d-reach/scripts/quota.py reset brightdata
 **留 30% 裕度**：日线和月线都按 70% 设线，剩下 30% 留给当天突发任务。
 免费通道（Firecrawl Developer / TinyFish / StackExchange / HN / OpenAlex / Crossref / 掘金 /
 SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 深挖时优先铺满它们**；
-已除名：cn.bing（投毒）、V2EX 搜索（退役）、博客园（退役）。
+已除名：cn.bing（投毒，已从 fanout 移除）、V2EX 搜索（退役）、博客园（退役）、browser_use（本机不存在）。
 这才是「用足日额度」的正确姿势。
 
 计数文件 `~/.agent-reach/quota.json`，跨日/跨月自动归零。
 `fanout.sh` 结束会自动跑 `quota_probe.py --quiet` 做**官方额度校准**（写 `_official` 段，
 10 分钟内复用）。能查的只有 Firecrawl 与 TinyFish；其余靠本地计数，别把本地数字当厂商余额。
-⏱ = 调用前 `quota.py use <svc>`。例外：**百度千帆由它自己的计数器记账**（别双扣）；
+⏱ = 两段式记账：`fanout` 先 `quota.py check`，**请求成功（HTTP 200）才 `use` 真扣，失败不扣**。
+手动调用时同样如此；`quota.py refund <svc>` 可退回误记的额度。例外：**百度千帆由它自己的计数器记账**（别双扣）；
 Firecrawl 的两个 Index REST 端点免费不记账，只有走 SDK 抓取才 `use firecrawl`；
 gh / yt-dlp / DeepWiki / V2EX 免费无限，不记账。
 **Jina 与 Exa 同样是 ⏱ 通道，别因为「感觉免费」就跳过记账** —— 实测近 30 天有 25 次 Jina、

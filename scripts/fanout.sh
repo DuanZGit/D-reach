@@ -19,7 +19,7 @@
 #       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   bing se hn jj oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
+#   se hn jj oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
@@ -35,12 +35,13 @@ BAIDU="$SKILLS/baiduaisearchwithquota/scripts"
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
 
 # ---------- 参数 ----------
-Q=""; DEEP=0; N=5; ON=""
+Q=""; DEEP=0; N=5; ON=""; FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1 ;;
     --n) shift; N="${1:-5}" ;;
     --on) shift; ON="${1:-}" ;;
+    --force) FORCE=1 ;;   # 忽略健康状态，强制跑（调试/复检用）
     --list) python3 - "$0" <<'PY'
 import re, sys
 src = open(sys.argv[1], encoding='utf-8').read()
@@ -65,7 +66,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-  KNOWN="qianfan bing fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd"
+  KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd"
   _bad=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
@@ -89,43 +90,55 @@ CJK=$(python3 -c 'import sys,re;print("1" if re.search(r"[\u4e00-\u9fff\u3400-\u
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-CH="$TMP/chans"; mkdir -p "$CH"
+HEALTH="${D_REACH_HEALTH:-$HOME/.agent-reach/channels.json}"
+HEALTH_BAD=$(python3 - "$HEALTH" <<'PY' 2>/dev/null
+import json, sys
+bad = []
+try:
+    h = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    h = {}
+for k, v in h.items():
+    if isinstance(v, dict) and v.get("streak_fail", 0) >= 3:
+        bad.append(k)
+print(" ".join(bad))
+PY
+)
 
-# ---------- 记账闸门 ----------
-# 返回 0=可跑；1=越免费线(跳过)；key 缺失也返回 1 并写原因
+# ---------- 记账闸门（两段式）----------
+# gate 只 check 不扣；请求成功后才 charge 真扣（失败由调用方 refund 或干脆不扣）。
+# 返回 0=可跑；1=越免费线/key 缺失（写好 skip 原因）
 gate() {
   svc="$1"
   if [ "$svc" = "fcres" ]; then
-    # Firecrawl Research Index 论文端点官方免费 → 只验 key，不记账（2026-10-26 对定价页核实）
+    # Firecrawl Research Index 论文端点官方免费 → 只验 key，不记账（2026-10-26 定价页核实）
     FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
     return 0
   elif [ "$svc" = "exa" ]; then
     EXA_KEY=$(sh "$DIR/load_key.sh" EXA_API_KEY https://dashboard.exa.ai 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "langsearch" ]; then
     LS_KEY=$(sh "$DIR/load_key.sh" LANGSEARCH_API_KEY https://langsearch.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
-  elif [ "$svc" = "firecrawl" ]; then
-    FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "tinyfish" ]; then
     TF_KEY=$(sh "$DIR/load_key.sh" TINYFISH_API_KEY https://agent.tinyfish.ai/api-keys 2>/dev/null) || { echo "key" > "$TMP/skip.tinyfish"; return 1; }
     return 0   # TinyFish search $0.00/次 → 不走 quota 记账
   elif [ "$svc" = "brightdata" ]; then
     BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   fi
-  python3 "$QUOTA" use "$svc" >/dev/null 2>&1; _qrc=$?
+  python3 "$QUOTA" check "$svc" >/dev/null 2>&1; _qrc=$?
   # 0=正常，2=已过裕度线（仍可跑）；1=越免费线 → 跳过
-  # 旧版把 2 也当失败，结果越接近裕度线可用通道越少，跟裕度线本意相反。
   if [ "$_qrc" = "1" ]; then
     echo "quota" > "$TMP/skip.$svc"; return 1
   fi
   return 0
 }
+
+# 成功后真扣额度（失败不扣：宁少记不多记）
+charge() {
+  python3 "$QUOTA" use "$1" >/dev/null 2>&1 || true
+}
 want() { [ -z "$ON" ] && return 0; case ",$ON," in *",$1,"*) return 0;; esac; return 1; }
 
 # ---------- 免费免 Key 通道 ----------
-f_bing() {   # 英文/技术
-  curl -s --max-time 14 -A "$UA" -G "https://cn.bing.com/search" --data-urlencode "q=$Q" \
-    -H 'Accept-Language: en-US,en;q=0.9' -o "$TMP/bing.html" 2>/dev/null
-}
 f_se() {     # StackExchange 排障
   # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
   # shellcheck disable=SC2086
@@ -134,22 +147,22 @@ f_se() {     # StackExchange 排障
   curl -s --compressed --max-time 15 -G "https://api.stackexchange.com/2.3/search/advanced" \
     --data-urlencode "order=desc" --data-urlencode "sort=relevance" \
     --data-urlencode "q=$SEQ" --data-urlencode "site=stackoverflow" \
-    --data-urlencode "pagesize=5" -o "$TMP/se.json" 2>/dev/null
+    --data-urlencode "pagesize=5" -o "$TMP/se.json" -w '%{http_code}' > "$TMP/se.http" 2>/dev/null
 }
 f_hn() {     # HN 深技术讨论
   curl -s --max-time 12 -G "https://hn.algolia.com/api/v1/search" \
-    --data-urlencode "query=$Q" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" 2>/dev/null
+    --data-urlencode "query=$Q" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" -w '%{http_code}' > "$TMP/hn.http" 2>/dev/null
 }
 f_jj() {     # 掘金 中文技术长尾
   curl -s --max-time 12 -H 'Content-Type: application/json' -X POST \
     "https://api.juejin.cn/search_api/v1/search" \
     -d "$(python3 -c 'import json,sys;print(json.dumps({"key_word":sys.argv[1],"id_type":0,"cursor":"0","limit":5,"search_type":0}))' "$Q")" \
-    -o "$TMP/jj.json" 2>/dev/null
+    -o "$TMP/jj.json" -w '%{http_code}' > "$TMP/jj.http" 2>/dev/null
 }
 f_oalex() {  # OpenAlex 学术
   curl -s --max-time 12 -G "https://api.openalex.org/works" \
     --data-urlencode "search=$Q" --data-urlencode "per-page=5" \
-    --data-urlencode 'mailto=d-reach@local' -o "$TMP/oalex.json" 2>/dev/null
+    --data-urlencode 'mailto=d-reach@local' -o "$TMP/oalex.json" -w '%{http_code}' > "$TMP/oalex.http" 2>/dev/null
 }
 f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时跳过）
   if [ "$CJK" = "1" ]; then
@@ -158,20 +171,27 @@ f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时
   fi
   curl -s --max-time 12 -G "https://api.crossref.org/works" \
     --data-urlencode "query=$Q" --data-urlencode "rows=5" \
-    --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" 2>/dev/null
+    --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" -w '%{http_code}' > "$TMP/crossref.http" 2>/dev/null
 }
 f_segfault() { # SegmentFault 中文技术长尾（-L 跟跳转；博客园已废弃）
   curl -sL --compressed --max-time 14 -A "$UA" -G "https://segmentfault.com/search" \
-    --data-urlencode "q=$Q" -o "$TMP/segfault.html" 2>/dev/null
+    --data-urlencode "q=$Q" -o "$TMP/segfault.html" -w '%{http_code}' > "$TMP/segfault.http" 2>/dev/null
 }
 f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
   curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" \
-    --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" 2>/dev/null
+    --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
   [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆技能目录缺失（$BAIDU）" > "$TMP/qianfan.txt"; return; }
-  timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" 2>&1 |
-    sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' > "$TMP/qianfan.txt"
+  timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" \
+    > "$TMP/qianfan.raw" 2> "$TMP/qianfan.err"
+  _qrc=$?
+  sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' "$TMP/qianfan.raw" > "$TMP/qianfan.txt" 2>/dev/null
+  # 千帆报错时绝不能把错误文本当「AI 答案」渲染：报错、空输出、或 stderr 有内容 → 标 err
+  if [ "$_qrc" != "0" ] || [ ! -s "$TMP/qianfan.txt" ] || [ -s "$TMP/qianfan.err" ]; then
+    echo "err" > "$TMP/skip.qianfan"
+    head -c 300 "$TMP/qianfan.err" >> "$TMP/qianfan.txt" 2>/dev/null
+  fi
 }
 
 f_tf() {   # TinyFish Search（官方 hosted MCP，$0/次；JSON-RPC tools/call search）
@@ -211,6 +231,7 @@ f_langsearch() {
     -H "Authorization: Bearer $LS_KEY" -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":20}))' "$Q")" \
     -o "$TMP/langsearch.json" -w '%{http_code}' > "$TMP/langsearch.http" 2>/dev/null
+  [ "$(cat "$TMP/langsearch.http" 2>/dev/null)" = "200" ] && charge langsearch
 }
 f_exa() {
   gate exa || return 0
@@ -218,6 +239,7 @@ f_exa() {
     -H "x-api-key: $EXA_KEY" -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"numResults":10}))' "$Q")" \
     -o "$TMP/exa.json" -w '%{http_code}' > "$TMP/exa.http" 2>/dev/null
+  [ "$(cat "$TMP/exa.http" 2>/dev/null)" = "200" ] && charge exa
 }
 f_fcres() {
   gate fcres || return 0
@@ -235,6 +257,7 @@ f_bd() {
     -H "Authorization: Bearer $BD_KEY" -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys,os,urllib.parse;print(json.dumps({"zone":os.environ.get("BRIGHTDATA_ZONE","mcp_unlocker"),"format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
     -o "$TMP/bd.json" -w '%{http_code}' > "$TMP/bd.http" 2>/dev/null
+  [ "$(cat "$TMP/bd.http" 2>/dev/null)" = "200" ] && charge brightdata
 }
 # 已退役通道（2026-09-25 实测，别往回加）：
 #   · V2EX /search?q= —— 302 → /go/search，返回「搜索引擎技术研究」节点帖子，与 query 无关
@@ -244,10 +267,17 @@ f_bd() {
 
 # ---------- 并发发射 ----------
 launch() {   # $1 = 函数名；失败不拖垮整体
-  fn="$1"; want "${fn#f_}" || return 0
-  ( "$fn" ) & 
+  fn="$1"; key="${fn#f_}"
+  want "$key" || return 0
+  # 健康状态：连续失败 ≥3 次的路默认不再发请求（除非 --force 或 --on 显式点名）
+  if [ "$FORCE" != "1" ] && [ -z "$ON" ]; then
+    case " $HEALTH_BAD " in
+      *" $key "*) echo "health" > "$TMP/skip.$key"; return 0 ;;
+    esac
+  fi
+  ( "$fn" ) &
 }
-for fn in f_bing f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf; do launch "$fn"; done
 if [ "$DEEP" = 1 ]; then
   for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
@@ -256,6 +286,7 @@ wait
 # ---------- 渲染 ----------
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
 import json, os, re, sys, html, pathlib
+from datetime import datetime, timezone
 
 tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
 N = max(1, min(N, 20))
@@ -554,17 +585,11 @@ def r_bd():
         return None
     return rowify(walk_generic(d))
 
-def r_v2ex():
-    """已退役 —— 2026-09-25 实测 /search?q= 302→/go/search，返回与 query 无关的节点帖子。
-    保留函数只为说明「为什么移除」，不要在 SECTIONS 里启用它。"""
-    return None
-
 # (key, 通道名, 说明, 解析函数, 仅 deep)
 SECTIONS = [
     ("qianfan",  "百度千帆（生成式综合答案）",
      "⚠️ AI 浓缩回答、非来源链接 —— 关键结论必须另找一手源验证",
      lambda: load_text("qianfan.txt"), False),
-    ("bing",     "cn.bing（英文/技术）", "免 Key 不限量", r_bing, False),
     ("fcdev",    "Firecrawl Developer Index（编程一手源 70M+）", "免 Key 不限量", r_fcdev, False),
     ("se",       "StackExchange（报错排障）", "免 Key 不限量", r_se, False),
     ("hn",       "Hacker News（深技术讨论）", "免 Key 不限量", r_hn, False),
@@ -596,66 +621,113 @@ def http_code(key):
 _default_n = sum(1 for _s in SECTIONS if not _s[4])
 _label = (f"deep 深调研档（{len(SECTIONS)} 路）" if DEEP == "1" else f"默认档（{_default_n} 路）")
 print(f"## fanout「{Q}」— {_label}\n")
-total, okc, dead, zero = 0, 0, [], 0
+# ---------- 通道健康状态（跨轮记忆）----------
+HEALTH = pathlib.Path(os.environ.get("D_REACH_HEALTH") or os.path.expanduser("~/.agent-reach/channels.json"))
+
+def load_health():
+    try:
+        return json.loads(HEALTH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def save_health(h):
+    try:
+        HEALTH.parent.mkdir(parents=True, exist_ok=True)
+        tmpf = HEALTH.with_suffix(".tmp")
+        tmpf.write_text(json.dumps(h, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmpf.replace(HEALTH)
+    except Exception:
+        pass
+
+health = load_health()
+now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+def mark(key, status):
+    """ok / fail / skip。skip 不计失败，避免「本轮没请求」把通道判死。"""
+    v = health.setdefault(key, {"ok": 0, "fail": 0, "streak_fail": 0})
+    if status == "ok":
+        v["ok"] = v.get("ok", 0) + 1
+        v["streak_fail"] = 0
+        v["last_ok"] = now_iso
+    elif status == "fail":
+        v["fail"] = v.get("fail", 0) + 1
+        v["streak_fail"] = v.get("streak_fail", 0) + 1
+        v["last_fail"] = now_iso
+    else:
+        v["last_skip"] = now_iso
+
+total, okc, zero = 0, 0, 0
+skipped, failed = [], []
 for key, name, note, fn, deep_only in SECTIONS:
     if ONLY and key not in ONLY:
         continue                      # 本轮没请求这条路 → 不渲染（≠无响应）
     if deep_only and DEEP != "1" and not os.path.exists(os.path.join(tmp, "skip." + key)):
         continue
     skip = read_skip(key)
+    if skip == "health":
+        bad = (health.get(key) or {}).get("streak_fail", 0)
+        print(f"### 🔇 {name} —— 连续失败 {bad} 次，已按健康状态跳过（`--force` 可强跑）\n")
+        skipped.append(name); mark(key, "skip")
+        continue
     if skip == "key":
         print(f"### 🔇 {name} —— 未配置 API key（写入 `~/.config/agents/env` 即解锁）\n")
-        dead.append(name)
+        skipped.append(name); mark(key, "skip")
         continue
     if skip == "quota":
         print(f"### 🔇 {name} —— 已越免费线，本轮自动跳过\n")
-        dead.append(name)
+        skipped.append(name); mark(key, "skip")
         continue
     if skip == "cjk":
         print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
               f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
-        dead.append(name)
+        skipped.append(name); mark(key, "skip")
         continue
     if skip == "err":
-        # 依赖脚本缺失/报错：绝不能把错误文本当答案渲染出来
         detail = load_text(key + ".txt") or ""
         print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
-        dead.append(name)
+        failed.append(name); mark(key, "fail")
         continue
     try:
         rows = fn()
     except Exception as e:
         rows = None
+        print(f"<!-- {key} 解析异常: {type(e).__name__}: {str(e)[:120]} -->", file=sys.stderr)
     code = http_code(key)
     if code and code not in ("200", "000") and (rows is None or rows == [] or isinstance(rows, tuple)):
         print(f"### ⚠️ {name} —— HTTP {code}（参数/凭据/限流问题，不是「没搜到」）\n")
-        dead.append(name)
+        failed.append(name); mark(key, "fail")
         continue
     if isinstance(rows, str):                      # 千帆文本
         body = rows.strip()
         if body:
-            okc += 1
+            okc += 1; mark(key, "ok")
             print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
         else:
-            print(f"### ❌ {name} —— 无返回\n"); dead.append(name)
+            print(f"### ❌ {name} —— 无返回\n"); failed.append(name); mark(key, "fail")
     elif isinstance(rows, tuple):                  # ("ERR", msg)
-        print(f"### ⚠️ {name} —— {rows[1]}\n"); dead.append(name)
+        print(f"### ⚠️ {name} —— {rows[1]}\n"); failed.append(name); mark(key, "fail")
     elif rows is None:
-        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); dead.append(name)
+        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(name); mark(key, "fail")
     elif not rows:
-        zero += 1
+        zero += 1; mark(key, "ok")
         print(f"### ⚪ {name} —— 通道正常，0 命中\n")
     else:
-        okc += 1
+        okc += 1; mark(key, "ok")
         total += len(rows)
         print(f"### ✅ {name}\n_{note}_\n")
         for t, u, x in rows:
             print(f"- [{t}]({u})" + (f" — {x}" if x else ""))
         print()
 
+save_health(health)
+weak = [f"{k}({v.get('streak_fail', 0)} 连败)" for k, v in health.items()
+        if isinstance(v, dict) and v.get("streak_fail", 0) >= 3]
 print(f"---\n**汇总**：{okc} 路有结果，共 {total} 条来源"
       + (f"；{zero} 路 0 命中" if zero else "")
-      + (f"；跳过 {len(dead)} 路（{ '、'.join(dead) }）" if dead else "") + "。\n")
+      + (f"；{len(failed)} 路失败（{ '、'.join(failed) }）" if failed else "")
+      + (f"；{len(skipped)} 路跳过（{ '、'.join(skipped) }）" if skipped else "") + "。\n")
+if weak:
+    print(f"**通道健康**：{'、'.join(weak)} —— 下次默认跳过，可用 `--force` 强跑复检。\n")
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
