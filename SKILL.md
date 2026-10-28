@@ -367,7 +367,10 @@ bilibili video hot --json                        # 热门（免登录）
 bilibili auth status --json / auth login start   # 登录态 / 扫码登录
 # 旧的 Python bili 0.6.2 仍在（有 6 月登录态），需要个人数据时可回退：bili whoami
 
-xhs search "关键词" --json         # 2026-10-28 换到 xhs-cli（逆向 API 版，更快、风控略差）
+xhs search "关键词" --json         # 用 xiaohongshu-cli（纯 HTTP + cookie）
+# 为什么不用 xhs-cli（逆向 API 版）：它连 search 都要先下载 200MB 的 camoufox 浏览器，
+# 官网 GitHub release 又常卡住；xiaohongshu-cli 只要 cookie，直接走 HTTP，更轻。
+# 登录：浏览器取 a1 + web_session，写成 ~/.xiaohongshu-cli/cookies.json（扁平结构）
 xhs comments <note_id> --xsec-token <token> --all --yaml
 ```
 
