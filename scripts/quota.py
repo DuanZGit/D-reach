@@ -5,7 +5,7 @@
 
   quota.py status            看所有通道原始计数
   quota.py budget            规划本轮调研：到裕度线还剩多少、今日建议额度
-  quota.py use <svc> [n]     占用 n 次。exit 0=正常 / 2=已过裕度线(仍记账) / 1=越免费线(不记账)
+  quota.py use <svc> [n]     记一次占用（fanout 在请求成功后才调）。exit 0/2/1
   quota.py check <svc> [n]   只看不占，退出码同 use
   quota.py reset [svc]       清零
 
@@ -79,7 +79,11 @@ def _save(d):
 
 @contextlib.contextmanager
 def _locked():
-    """跨进程互斥：fanout.sh 会并行调多路 use，无锁会丢失更新。"""
+    """跨进程互斥：fanout.sh 会并行调多路 use，无锁会丢失更新。
+
+    ponytail: 一把全局锁串行化所有服务；单机低频完全够用。
+    并发量真上去（>50 进程/秒）再换 per-service 锁。
+    """
     FILE.parent.mkdir(parents=True, exist_ok=True)
     lock_path = FILE.with_suffix(FILE.suffix + ".lock")
     with open(lock_path, "a+") as fh:
@@ -230,26 +234,6 @@ def main(argv):
             code, msg = _try(d, svc, n, cmd == "use")
             print(msg)
             return code
-        if cmd == "refund":
-            # 两段式记账的另一半：请求失败时把先占的额度退回来
-            svc = argv[2] if len(argv) > 2 else ""
-            if not svc:
-                print("usage: quota.py refund <service> [count]")
-                return 2
-            try:
-                n = int(argv[3]) if len(argv) > 3 else 1
-            except ValueError:
-                print(f"count 必须是整数：{argv[3]!r}")
-                return 2
-            if svc not in LIMITS:
-                print(f"{svc}: 无限额，无需退款")
-                return 0
-            b = _bucket(d, svc)
-            b["monthly"] = max(b["monthly"] - n, 0)
-            b["daily"] = max(b["daily"] - n, 0)
-            _save(d)
-            print(f"refund {svc} {n} → 月 {b['monthly']} / 日 {b['daily']}")
-            return 0
         if cmd == "reset":
             svc = argv[2] if len(argv) > 2 else None
             if svc:

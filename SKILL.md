@@ -379,7 +379,7 @@ SegmentFault / 36氪 / 豆瓣 / gh CLI / DeepWiki）**不限量、不记账 → 
 `fanout.sh` 结束会自动跑 `quota_probe.py --quiet` 做**官方额度校准**（写 `_official` 段，
 10 分钟内复用）。能查的只有 Firecrawl 与 TinyFish；其余靠本地计数，别把本地数字当厂商余额。
 ⏱ = 两段式记账：`fanout` 先 `quota.py check`，**请求成功（HTTP 200）才 `use` 真扣，失败不扣**。
-手动调用时同样如此；`quota.py refund <svc>` 可退回误记的额度。例外：**百度千帆由它自己的计数器记账**（别双扣）；
+手动调用时同样如此。例外：**百度千帆由它自己的计数器记账**（别双扣）；
 Firecrawl 的两个 Index REST 端点免费不记账，只有走 SDK 抓取才 `use firecrawl`；
 gh / yt-dlp / DeepWiki / V2EX 免费无限，不记账。
 **Jina 与 Exa 同样是 ⏱ 通道，别因为「感觉免费」就跳过记账** —— 实测近 30 天有 25 次 Jina、
