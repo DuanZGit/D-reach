@@ -181,6 +181,29 @@ def _budget(d):
     out = "\n".join(lines)
     out += "\n\n今日可用（到裕度线）：" + "；".join(advice)
     out += ("\n免 Key 不限量通道（不记账，深挖优先铺满）：" + " / ".join(FREE_CHANNELS))
+    off = d.get("_official") or {}
+    if off:
+        out += "\n官方额度校准（最近一次 quota_probe）："
+        for name, v in off.items():
+            st = v.get("state")
+            if st == "ok" and name == "firecrawl":
+                out += (f"\n  {name}: 剩余 {v.get('remaining')}/{v.get('total')} credits"
+                        f"，账期至 {str(v.get('period_end'))[:10]}")
+            elif st == "ok" and name == "tinyfish":
+                out += f"\n  {name}: 钱包 {v.get('balance')} {v.get('currency')}"
+            elif st == "ok":
+                out += f"\n  {name}: ok"
+            elif st == "no_permission":
+                out += f"\n  {name}: 权限不足"
+            elif st == "unavailable":
+                out += f"\n  {name}: 无公开接口"
+            elif st == "no_key":
+                continue
+            else:
+                out += f"\n  {name}: {v.get('error')}"
+        out += "\n  （本地计数 = 我们发过几次；官方数字 = 厂商真实剩余，差异大说明漏记）"
+    else:
+        out += "\n官方额度：尚未校准，跑 `python3 scripts/quota_probe.py`（fanout 结束会自动跑一次）"
     return out
 
 

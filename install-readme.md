@@ -83,6 +83,10 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 > `SERPER_API_KEY` / `SCRAPECREATORS_API_KEY` 已从本表移除：当前 `fanout.sh` 与 `quota.py` 里**没有任何代码读它们**（早前版本留的残影）。
 > 需要这两家的能力时按 `references/` 里的 REST 示例手打，并自己把 key 写进 env。
 
+**额度会自动校准**：`fanout.sh` 每次跑完调用 `scripts/quota_probe.py`，去官方接口查真实剩余
+（Firecrawl `/v2/team/credit-usage`、TinyFish MCP `get_wallet`）。其余几家没有公开额度接口，
+继续用本地记账兜底。想看校准结果：`python3 scripts/quota.py budget`。
+
 ### 4.2 登录态（社交通道，不是普通 key）
 
 | 变量 / 文件 | 用途 | 拿法 |

@@ -29,6 +29,9 @@ python3 scripts/quota.py budget
 # 看原始计数
 python3 scripts/quota.py status
 
+# 官方额度校准（查厂商真实剩余，写进 quota.json 的 _official 段）
+python3 scripts/quota_probe.py
+
 # 占用一次：exit 0=正常 / 2=已过裕度线（仍记账）/ 1=越免费线（不记账）
 python3 scripts/quota.py use brightdata
 
@@ -48,6 +51,10 @@ bash scripts/fanout.sh "ollama vs vllm" --deep
 **调研强度默认 L2**（≥6 个独立来源 + 2 轮），命中「对比/选型/调研/为什么/最新/vs」等词自动升 L3
 （≥10 来源 + 3 轮）。定档依据、查询改写 ≥5 种、收尾自查见 SKILL.md。
 免费免 Key 通道不记账，**fanout 默认档已一次并发铺满；deep 四路月余量 >96%，L3 无条件铺**。
+
+`fanout.sh` 跑完会自动做一次**官方额度校准**（`quota_probe.py --quiet`，10 分钟内复用上次结果，
+不拖慢本轮）。可查的只有 Firecrawl（`/v2/team/credit-usage`）和 TinyFish（MCP `get_wallet`）；
+BrightData 需要 token 有 account 读权限，Exa / Jina / LangSearch 没有公开额度接口 —— 这些继续用本地计数兜底。
 
 ## 免费额度一览
 
