@@ -97,7 +97,7 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 | Firecrawl Free | 1,000 credits / 月（约 500 次 search 或 1,000 页抓取） | 月，不结转 | BrightData → Jina |
 | Firecrawl Research Index | **论文端点完全免费，不耗 credits**（官方 Billing FAQ 明确） | — | — |
 | Firecrawl Developer Index | 免 API key | — | — |
-| 百度千帆搜索 | 400 / 日（**由 baiduaisearchwithquota 自己记账**，非本技能扣） | 日 | BrightData → Exa |
+| 百度千帆搜索 | 400 / 日（**由独立技能 [baiduaisearchwithquota](https://github.com/Stan-Xia/zhisou-skill) 自己记账**，非本技能扣；不在本仓，需单独 clone） | 日 | BrightData → Exa |
 | Jina Reader | 免 key 约 20 RPM；有 key 约 200 RPM（按 token 计） | 分钟级 | BrightData |
 | TinyFish search / fetch | **$0/次**（30 搜/分、150 抓/分） | 分钟级 | — |
 | Serper | 2,500 次（**一次性，不重置**） | 不重置 | 换 Exa / LangSearch |

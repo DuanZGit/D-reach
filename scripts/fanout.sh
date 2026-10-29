@@ -31,7 +31,13 @@ set -u
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 QUOTA="$DIR/quota.py"
 SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills
-BAIDU="$SKILLS/baiduaisearchwithquota/scripts"
+# 千帆配套技能目录名有两版：历史/本机 baiduaisearchwithquota，viking 分发版按 slug 落成
+# baidu-ai-search。两个都探，先命中先用；都没有时只让 qianfan 这一路报错，其余照跑。
+BAIDU=""
+for _bd in "$SKILLS/baiduaisearchwithquota/scripts" "$SKILLS/baidu-ai-search/scripts"; do
+  [ -f "$_bd/smart_search.py" ] && { BAIDU="$_bd"; break; }
+done
+[ -n "$BAIDU" ] || BAIDU="$SKILLS/baiduaisearchwithquota/scripts"
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
 
 # ---------- 参数 ----------
@@ -182,7 +188,7 @@ f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
     --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
-  [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆技能目录缺失（$BAIDU）" > "$TMP/qianfan.txt"; return; }
+  [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆配套技能缺失（找不到 $SKILLS/{baiduaisearchwithquota,baidu-ai-search}/scripts）。装上面任一名字的技能即可恢复本路，缺它不影响其余 12 路。" > "$TMP/qianfan.txt"; return; }
   timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" \
     > "$TMP/qianfan.raw" 2> "$TMP/qianfan.err"
   _qrc=$?

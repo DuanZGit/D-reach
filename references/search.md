@@ -292,9 +292,11 @@ curl -s --max-time 30 -X POST https://api.langsearch.com/v1/web-search \
 
 **不在本技能记账，也不在此复制文档** —— 配额、场景、工具清单全部由独立技能
 `baiduaisearchwithquota` 自己维护（计数器在 `~/.baidu_search_quota.json`）。
+它**不在本仓**：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`；
+若从 OpenViking 装，目录名会是 `baidu-ai-search`（同一个包，slug 不同），下面两种都探。
 
 ```bash
-S=$SKILLS/baiduaisearchwithquota/scripts
+S="$SKILLS/baiduaisearchwithquota/scripts"; [ -d "$S" ] || S="$SKILLS/baidu-ai-search/scripts"
 python3 $S/smart_search.py search '搜索内容'          # 搜索（最常用）
 python3 $S/quota_manager.py dispatch search '内容'    # 按场景调度（自动跳过用完/≤20% 的 API）
 python3 $S/quota_manager.py status                    # 27 个工具剩余额度
