@@ -287,7 +287,9 @@ PAGE = r"""<!doctype html>
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const K = new URLSearchParams(location.search).get('k') || '';
-const api = p => p + (K ? (p.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(K) : '');
+// 挂在反代子路径（如 https://pi.duanz.xin:1218/reach/）时，API 跟着带前缀
+const BASE = location.pathname.replace(/\/(index\.html)?$/, "");
+const api = p => BASE + p + (K ? (p.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(K) : '');
 
 let channels = [];      // /api/state 的通道
 let quota = {};         // key -> {used, limit, official}
@@ -613,6 +615,9 @@ class Handler(BaseHTTPRequestHandler):
             ip = ipaddress.ip_address(self.client_address[0])
         except ValueError:
             return False
+        # 反代（Caddy）从回环进来：前面已做过认证与 IP 守卫，不再要 key
+        if ip.is_loopback:
+            return True
         if not any(ip in net for net in ALLOWED):
             return False
         given = self.headers.get("X-Gateway-Key")
