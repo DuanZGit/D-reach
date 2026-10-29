@@ -46,8 +46,14 @@ python3 scripts/quota.py budget        # 看限额通道还剩多少
 python3 scripts/test_quota.py          # 记账逻辑自检（应打印「自检通过」）
 python3 scripts/gateway.py --port 3426  # 可选：可视化网关，浏览器开 http://127.0.0.1:3426/
 
-# 可选：装成 pi 插件（与 skill 并行，用工具而不是读 SKILL.md）
-ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
+# 装成 pi 插件（自包含，不需要 skill）：把 plugin/ 整个目录放进扩展目录
+ln -s "$(pwd)/plugin" ~/.pi/agent/extensions/d-reach
+
+# 插件自带四个工具，装上即可用，不需要先读 SKILL.md：
+#   d_reach        检索（auto/quick/base/deep）
+#   d_reach_fetch  抓 URL（curl→TinyFish→Jina→BrightData 四档降级）
+#   d_reach_quota  额度与通道健康
+#   d_reach_social B站/小红书登录态与搜索，bvid 可直接取字幕
 ```
 
 默认档 9 路里有 7 路**完全不需要 key**（Crossref 遇中文自动跳过），所以第一次跑就该有结果。
