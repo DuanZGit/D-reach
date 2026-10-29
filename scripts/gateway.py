@@ -253,10 +253,10 @@ PAGE = r"""<!doctype html>
     .rt-stage .rt-node{padding:10px 6px 8px}
     .rt-stage .rt-node .glyph{font-size:17px;margin-bottom:1px}
     .rt-accts{grid-column:1 / -1;padding-left:18px;max-height:none}
+    .rt-wires{overflow:visible}
     .rt-accts li{grid-template-columns:10px minmax(0,1fr);row-gap:4px}
     .rt-accts li .right{grid-column:2;text-align:left}
     .rt-accts li .bar{grid-column:2}
-    .rt-wires{display:none}
     .rt-foot{flex-direction:column;align-items:stretch;gap:10px}
     .stats{justify-content:flex-start;text-align:left;gap:20px}
     .stats b{font-size:20px}
@@ -279,6 +279,16 @@ PAGE = r"""<!doctype html>
   .rt-stage{position:relative;display:grid;grid-template-columns:124px 124px minmax(0,1fr);
     column-gap:56px;align-items:center;padding:22px 2px}
   .rt-wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:0}
+  /* 飞行层：放大镜沿 wire 从 hub 飞到通道行（magpie 用喜鹊，这里用放大镜） */
+  .rt-sky{position:absolute;inset:0;width:100%;height:100%;overflow:visible;
+    pointer-events:none;z-index:2}
+  .rt-sky .mag{opacity:0}
+  .rt-sky .mag circle,.rt-sky .mag path{stroke:var(--fg-2);stroke-width:2.2;fill:none;stroke-linecap:round}
+  .rt-sky .mag.on{opacity:1;filter:drop-shadow(0 1px 4px rgba(28,28,33,.28))}
+  .rt-sky .mag.done circle,.rt-sky .mag.done path{stroke:var(--green)}
+  .rt-sky .mag.done{filter:drop-shadow(0 0 5px rgba(24,154,88,.45))}
+  .rt-sky .mag.fail circle,.rt-sky .mag.fail path{stroke:var(--red)}
+  .rt-sky .mag.fail{filter:drop-shadow(0 0 5px rgba(192,57,43,.45))}
   .rt-wires path{fill:none;stroke:var(--line);stroke-width:1.5;transition:stroke .3s,opacity .3s}
   .rt-wires path.live{stroke:var(--green);stroke-dasharray:3 5;animation:rtflow .7s linear infinite}
   .rt-wires path.ok{stroke:var(--green);opacity:.55}
@@ -417,6 +427,7 @@ PAGE = r"""<!doctype html>
 
     <div class="rt-stage" id="stage">
       <svg class="rt-wires" id="wires"></svg>
+      <svg class="rt-sky" id="sky" aria-hidden="true"></svg>
       <div class="rt-node">
         <div class="glyph">⌕</div>
         <b id="node-q">查询</b>
@@ -473,6 +484,63 @@ function cellFor(ch){
   return {status:'idle', count:0, note:'还没跑过'};
 }
 
+// ---- 放大镜飞行：照 magpie 的 fly/pose（分段路径 + getPointAtLength + 长度缓存），
+//      magpie 用喜鹊叼着请求飞，这里换成放大镜；无翅膀，靠轻微缩放呼吸补节奏。
+const STILL = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const lenCache = new WeakMap();          // magpie 也缓存：每帧重算 getTotalLength 会拖慢页面
+function pathLen(el) {
+  const d = el.getAttribute("d");
+  if (!d) return 0;
+  let m = lenCache.get(el);
+  if (!m || m.d !== d) { m = { d, L: el.getTotalLength() }; lenCache.set(el, m); }
+  return m.L;
+}
+
+const LENS = '<circle cx="-5" cy="-5" r="5.2"/><path d="M-1.4 -1.4 L3.8 3.8"/>';
+
+function flyLens(wire, ms, fail) {
+  if (STILL || !wire || !pathLen(wire)) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const g = document.createElementNS(ns, "g");
+  g.setAttribute("class", "mag");
+  g.innerHTML = LENS;
+  $("#sky").appendChild(g);
+
+  const L = pathLen(wire);
+  const t0 = performance.now();
+  requestAnimationFrame(function step(now) {
+    const e = Math.min(1, (now - t0) / ms);
+    const eased = 1 - Math.pow(1 - e, 2.2);           // 起步快、收尾稳
+    const pt = wire.getPointAtLength(eased * L);
+    const beat = 1 + Math.sin(e * Math.PI * 3) * 0.12;
+    g.setAttribute("transform",
+      "translate(" + pt.x.toFixed(1) + " " + pt.y.toFixed(1) + ") scale(" + beat.toFixed(3) + ")");
+    g.classList.add("on");
+    if (e < 1) { requestAnimationFrame(step); return; }
+    g.classList.add(fail ? "fail" : "done");
+    setTimeout(function () {
+      g.style.transition = "opacity .35s"; g.style.opacity = "0";
+      setTimeout(function () { g.remove(); }, 380);
+    }, 260);
+  });
+}
+
+// 一轮跑完，按通道依次把放大镜放出去 —— 视觉上就是「请求从 hub 分发到各节点」
+function flyAll() {
+  if (STILL) return;
+  const wires = Array.prototype.slice.call(document.querySelectorAll("#wires path"));
+  const rows = Array.prototype.slice.call(document.querySelectorAll("#accts li"));
+  let i = 0;
+  wires.forEach(function (w, idx) {
+    const row = rows[idx];
+    if (!row) return;
+    const hit = row.classList.contains("hit") || row.classList.contains("ok");
+    const fail = row.classList.contains("fail");
+    if (!hit && !fail) return;
+    setTimeout(function () { flyLens(w, 620, fail); }, (i++) * 55);
+  });
+}
+
 function render(){
   const ul = $('#accts');
   ul.innerHTML = channels.map(ch => {
@@ -502,7 +570,12 @@ function drawWires(){
   svg.setAttribute('viewBox', '0 0 ' + box.width + ' ' + box.height);
   const hb = hub.getBoundingClientRect();
   const x1 = hb.right - box.left + 4, y1 = hb.top + hb.height/2 - box.top;
-  const paths = [...document.querySelectorAll('#accts li')].slice(0, 10).map((li, i) => {
+  const narrow = box.width <= 560;
+  const all = [...document.querySelectorAll('#accts li')];
+  // 窄屏（抽屉里）只画本轮真正分发到的行，否则十几条线挤在一起反而看不清
+  const rows = narrow ? all.filter(li => li.classList.contains('hit') || li.classList.contains('fail'))
+                      : all.slice(0, 10);
+  const paths = rows.map((li, i) => {
     const rb = li.getBoundingClientRect();
     const x2 = rb.left - box.left - 4, y2 = rb.top + rb.height/2 - box.top;
     const cx = (x1 + x2) / 2;
@@ -602,6 +675,7 @@ async function run(){
     $('#srcbox').hidden = false;
     $('#srcbox').open = true;
     render();
+    requestAnimationFrame(function () { flyAll(); });   // 等连线画好再飞
   } catch (e) {
     $('#node-pill').textContent = '失败';
     $('#foot-note').textContent = '失败：' + e.message;
