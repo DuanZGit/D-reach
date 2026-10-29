@@ -44,6 +44,10 @@ upstream:
 > 理由很直白：13 条路里 9 路走默认档（7 路完全免 key、千帆需配套技能、TinyFish 需 key 但 $0/次）、4 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
+>
+> 🧩 **配套技能（不在本仓里）**：千帆那一路靠第三方技能 `baiduaisearchwithquota`（克隆版目录名）或
+> `baidu-ai-search`（viking 按 slug 落的目录名），两者同一个包。只装 d-reach 不装它，千帆路会标 err 跳过，
+> 其余 12 路照跑。装法：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`。
 
 把"用户想找信息"翻译成"用哪个通道、怎么调用"。**路由表由你（agent）直接执行**，
 没有中间脚本；唯一的代码是 `scripts/quota.py`，它只负责记额度。
@@ -313,14 +317,16 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 ```bash
 # 百度千帆（400 次/日免费，配额由该技能自己记账，不要重复扣）
+# 配套技能目录名两版：本机历史名 baiduaisearchwithquota，viking/分发版 slug 落成 baidu-ai-search
+B="$SKILLS/baiduaisearchwithquota/scripts"; [ -d "$B" ] || B="$SKILLS/baidu-ai-search/scripts"
 # 普通搜索（生成式答案，fanout 里那一路走的就是它）
-python3 $SKILLS/baiduaisearchwithquota/scripts/smart_search.py search '查询'
+python3 $B/smart_search.py search '查询'
 
 # ---- 2026-09-25 起接通的「0/310 闲置工具」（KB-a3），全部走 dispatch 按场景调度 ----
 # knowledge 场景（200/日）：百科星图列表/详情 —— 公司/人物/产品的关联实体图谱，比百科词条更能"一圈圈挖"
-python3 $SKILLS/baiduaisearchwithquota/scripts/quota_manager.py dispatch knowledge '比亚迪 产业链'
+python3 $B/quota_manager.py dispatch knowledge '比亚迪 产业链'
 # 智能 Query 改写（10/日）：把手上的一个问题批量翻成多种问法 —— 查询改写矩阵 ≥5 种的自动生成器
-python3 $SKILLS/baiduaisearchwithquota/scripts/quota_manager.py dispatch search 'ollama vs vllm'   # 见 quota_manager.py list 取准确子命令名
+python3 $B/quota_manager.py dispatch search 'ollama vs vllm'   # 见 quota_manager.py list 取准确子命令名
 # 智能识图 / 相似图搜索（100/日 each）、秒懂百科（100/日）同理走 dispatch content|knowledge
 # ⚠️ 千帆工具清单与子命令名以 quota_manager.py list 为准，别照记忆写
 

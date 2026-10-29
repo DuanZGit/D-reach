@@ -33,6 +33,11 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 | `yt-dlp` | 否 | 视频字幕（B站/YouTube） | `pipx install yt-dlp` |
 | `bili` / `xhs` / `twitter-cli` | 否 | 社交平台登录态抓取 | 见 `references/social.md` |
 | `opencli` | 否 | 电商/雪球等适配器（需 Chrome 桥） | `npm i -g @jackwener/opencli`（本机 2.0.2；2.x 默认输出 JSON，`-f yaml` 仍可用） |
+| `baiduaisearchwithquota` 技能 | 否 | 千帆那一路（400 次/日）。**不在本仓里**，需单独装；目录名也接受 `baidu-ai-search`（同一包不同 slug）。两者都没有时 fanout 只标 err 跳过该路 | `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota` |
+
+> 千帆是**独立技能**，不在本仓里，clone 本仓不会带上它。缺它只少 1 路，其余 12 路照跑。
+> 它是第三方 skill（[Stan-Xia/zhisou-skill](https://github.com/Stan-Xia/zhisou-skill)，仅需 python3 + `BAIDU_API_KEY`），装法：
+> `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`
 
 不需要 Node、不需要 npm 安装、不需要任何 Python 第三方包。
 
