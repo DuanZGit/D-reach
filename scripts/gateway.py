@@ -528,11 +528,10 @@ function flyLens(wire, ms, fail) {
 // 一轮跑完，按通道依次把放大镜放出去 —— 视觉上就是「请求从 hub 分发到各节点」
 function flyAll() {
   if (STILL) return;
-  const wires = Array.prototype.slice.call(document.querySelectorAll("#wires path"));
   const rows = Array.prototype.slice.call(document.querySelectorAll("#accts li"));
   let i = 0;
-  wires.forEach(function (w, idx) {
-    const row = rows[idx];
+  document.querySelectorAll("#wires path[data-row]").forEach(function (w) {
+    const row = rows[Number(w.getAttribute("data-row"))];
     if (!row) return;
     const hit = row.classList.contains("hit") || row.classList.contains("ok");
     const fail = row.classList.contains("fail");
@@ -578,12 +577,15 @@ function drawWires(){
   const paths = rows.map((li, i) => {
     const rb = li.getBoundingClientRect();
     const x2 = rb.left - box.left - 4, y2 = rb.top + rb.height/2 - box.top;
+    // 几何保护：hub 与该行没有横向间距时（窄容器塌成单列），连线会退化成竖线，
+    // 看着像布局坏了 —— 直接不画这条
+    if (x2 - x1 < 28) return null;
     const cx = (x1 + x2) / 2;
     const cls = li.classList.contains('ok') ? 'ok' : li.classList.contains('fail') ? 'fail' : '';
     const live = lastRun && i === 0 ? ' live' : '';
-    return '<path class="' + cls + live + '" d="M' + x1 + ',' + y1 + ' C' + cx + ',' + y1 + ' ' +
-           cx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
-  });
+    return '<path data-row="' + all.indexOf(li) + '" class="' + cls + live + '" d="M' + x1 + ',' + y1 +
+           ' C' + cx + ',' + y1 + ' ' + cx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
+  }).filter(Boolean);
   svg.innerHTML = paths.join('');
 }
 
