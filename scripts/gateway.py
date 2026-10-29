@@ -54,6 +54,8 @@ DRAWER_JS = r"""
   window.__DREACH_DRAWER__ = 1;
   if (window.top !== window.self) return;
 
+  function boot() {
+
   var REACH = "/reach/";
   var style = document.createElement("style");
   style.textContent = [
@@ -120,13 +122,45 @@ DRAWER_JS = r"""
     b.onclick = open;
     menu.appendChild(b);
   }
+  // 顶部工具栏：找到文本是「工具」的那个按钮，克隆一个放它后面，
+  // 这样样式和 pi-web 自己的一模一样，也不依赖它的类名（改了也能用）
+  function topEntry() {
+    if (document.querySelector("[data-dreach-top]")) return;
+    var btns = Array.prototype.slice.call(document.querySelectorAll("button, a"));
+    var anchor = btns.filter(function (b) {
+      var tx = (b.textContent || "").replace(/\s+/g, "");
+      return tx === "工具" || tx === "系统";
+    })[0];
+    if (!anchor || !anchor.parentElement) return;
+    var b = anchor.cloneNode(false);
+    b.textContent = "路由";
+    b.setAttribute("data-dreach-top", "1");
+    b.removeAttribute("id");
+    b.title = "d-reach 路由（Alt+R）";
+    b.onclick = open;
+    anchor.parentElement.insertBefore(b, anchor.nextSibling);
+  }
+
+  function attach() {
+    menuEntry();
+    topEntry();
+  }
+
   var queued = false;
   new MutationObserver(function () {
     if (queued) return;
     queued = true;
-    requestAnimationFrame(function () { queued = false; menuEntry(); });
+    requestAnimationFrame(function () { queued = false; attach(); });
   }).observe(document.body, { childList: true, subtree: true });
-  menuEntry();
+  attach();
+
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { try { boot(); } catch (e) {} });
+  } else {
+    try { boot(); } catch (e) {}
+  }
 })();
 """
 
