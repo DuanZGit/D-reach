@@ -45,6 +45,91 @@ NO_KEY_PAGE = """<!doctype html><meta charset="utf-8"><title>需要访问 key</t
      或在能登录的终端跑 <code>cat ~/.agent-reach/gateway.key</code> 取。</p>
 </div></body>"""
 
+
+DRAWER_JS = r"""
+/* d-reach 侧滑抽屉（由 /reach/drawer.js 下发）
+   注入方式：pi-web 的 client chunk 末尾加载本文件，不修改它的 React 代码。 */
+(function () {
+  if (window.__DREACH_DRAWER__) return;
+  window.__DREACH_DRAWER__ = 1;
+  if (window.top !== window.self) return;
+
+  var REACH = "/reach/";
+  var style = document.createElement("style");
+  style.textContent = [
+    "#dreach-fab{position:fixed;right:18px;bottom:18px;z-index:2147483000;width:46px;height:46px;",
+    "border-radius:50%;background:#1c1c21;color:#fff;border:0;cursor:pointer;",
+    "box-shadow:0 6px 18px rgba(0,0,0,.22);font:600 13px/1 system-ui,sans-serif;",
+    "transition:transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s}",
+    "#dreach-fab:hover{transform:translateY(-2px)}",
+    "#dreach-fab.hide{opacity:0;pointer-events:none}",
+    "#dreach-mask{position:fixed;inset:0;z-index:2147482999;background:rgba(0,0,0,.28);",
+    "opacity:0;pointer-events:none;transition:opacity .24s}",
+    "#dreach-mask.on{opacity:1;pointer-events:auto}",
+    "#dreach-panel{position:fixed;top:0;right:0;bottom:0;z-index:2147483000;",
+    "width:min(460px,92vw);background:#f2f2f5;display:flex;flex-direction:column;",
+    "transform:translateX(102%);transition:transform .3s cubic-bezier(.3,.9,.3,1);",
+    "box-shadow:-8px 0 28px rgba(0,0,0,.16)}",
+    "#dreach-panel.on{transform:translateX(0)}",
+    "#dreach-head{display:flex;align-items:center;gap:8px;padding:10px 12px;",
+    "border-bottom:1px solid rgba(0,0,0,.08);background:#fff;",
+    "font:600 13px/1.4 system-ui,-apple-system,'PingFang SC',sans-serif;color:#1c1c21}",
+    "#dreach-head .d{width:7px;height:7px;border-radius:50%;background:#189a58}",
+    "#dreach-head .g{flex:1}",
+    "#dreach-head button{border:1px solid rgba(0,0,0,.12);background:#fff;color:#4b4b53;",
+    "border-radius:7px;font:500 12px/1 system-ui,sans-serif;padding:6px 9px;cursor:pointer}",
+    "#dreach-frame{flex:1;width:100%;border:0;background:#f2f2f5}",
+  ].join("");
+  document.head.appendChild(style);
+
+  var fab = document.createElement("button");
+  fab.id = "dreach-fab"; fab.textContent = "路由"; fab.title = "d-reach 路由（Alt+R）";
+  var mask = document.createElement("div"); mask.id = "dreach-mask";
+  var panel = document.createElement("section"); panel.id = "dreach-panel";
+  panel.innerHTML = '<div id="dreach-head"><span class="d"></span><span>d-reach · 路由与额度</span>' +
+    '<span class="g"></span><button id="dreach-tab">新窗口</button>' +
+    '<button id="dreach-close">关闭</button></div>' +
+    '<iframe id="dreach-frame" title="d-reach 网关"></iframe>';
+  document.body.appendChild(fab); document.body.appendChild(mask); document.body.appendChild(panel);
+
+  var frame = panel.querySelector("#dreach-frame"), loaded = false;
+  function open() {
+    if (!loaded) { frame.src = REACH; loaded = true; }
+    panel.classList.add("on"); mask.classList.add("on"); fab.classList.add("hide");
+  }
+  function close() {
+    panel.classList.remove("on"); mask.classList.remove("on"); fab.classList.remove("hide");
+  }
+  fab.onclick = open; mask.onclick = close;
+  panel.querySelector("#dreach-close").onclick = close;
+  panel.querySelector("#dreach-tab").onclick = function () { window.open(REACH, "_blank", "noopener"); };
+  document.addEventListener("keydown", function (e) {
+    if (e.altKey && (e.key === "r" || e.key === "R")) { e.preventDefault(); panel.classList.contains("on") ? close() : open(); }
+    else if (e.key === "Escape" && panel.classList.contains("on")) close();
+  });
+
+  // 侧边栏识别得到就再挂一个文字入口
+  function menuEntry() {
+    var menu = document.querySelector(".sidebar-menu");
+    if (!menu || menu.querySelector("[data-dreach-entry]")) return;
+    var b = document.createElement("button");
+    b.type = "button"; b.textContent = "d-reach 路由"; b.dataset.dreachEntry = "1";
+    b.style.cssText = "display:block;width:100%;text-align:left;padding:7px 12px;margin:2px 0;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;cursor:pointer";
+    b.onmouseenter = function () { b.style.background = "rgba(0,0,0,.05)"; };
+    b.onmouseleave = function () { b.style.background = "transparent"; };
+    b.onclick = open;
+    menu.appendChild(b);
+  }
+  var queued = false;
+  new MutationObserver(function () {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; menuEntry(); });
+  }).observe(document.body, { childList: true, subtree: true });
+  menuEntry();
+})();
+"""
+
 MANIFEST = """{
   "name": "d-reach 路由",
   "short_name": "d-reach",
@@ -662,6 +747,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE, "text/html; charset=utf-8")
         elif path == "/manifest.webmanifest":
             self._send(200, MANIFEST, "application/manifest+json; charset=utf-8")
+        elif path == "/drawer.js":
+            self._send(200, DRAWER_JS, "application/javascript; charset=utf-8")
         elif path in ("/icon.svg", "/icons/icon.svg"):
             self._send(200, ICON, "image/svg+xml; charset=utf-8")
         elif path == "/api/state":
