@@ -61,6 +61,7 @@ DRAWER_JS = r"""
   style.textContent = [
     "#dreach-fab{position:fixed;right:18px;bottom:18px;z-index:2147483000;width:46px;height:46px;",
     "border-radius:50%;background:#1c1c21;color:#fff;border:0;cursor:pointer;",
+    "display:flex;align-items:center;justify-content:center;",
     "box-shadow:0 6px 18px rgba(0,0,0,.22);font:600 13px/1 system-ui,sans-serif;",
     "transition:transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s}",
     "#dreach-fab:hover{transform:translateY(-2px)}",
@@ -84,8 +85,14 @@ DRAWER_JS = r"""
   ].join("");
   document.head.appendChild(style);
 
+  // 放大镜：跟「检索」的语义对齐，比一个「路由」二字更轻
+  var LENS = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.9"/>' +
+    '<path d="M15.6 15.6 L20.5 20.5" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>' +
+    '</svg>';
+
   var fab = document.createElement("button");
-  fab.id = "dreach-fab"; fab.textContent = "路由"; fab.title = "d-reach 路由（Alt+R）";
+  fab.id = "dreach-fab"; fab.innerHTML = LENS; fab.title = "d-reach 路由（Alt+R）";
   var mask = document.createElement("div"); mask.id = "dreach-mask";
   var panel = document.createElement("section"); panel.id = "dreach-panel";
   panel.innerHTML = '<div id="dreach-head"><span class="d"></span><span>d-reach · 路由与额度</span>' +
@@ -133,7 +140,11 @@ DRAWER_JS = r"""
     })[0];
     if (!anchor || !anchor.parentElement) return;
     var b = anchor.cloneNode(false);
-    b.textContent = "路由";
+    b.innerHTML = '<span style="display:inline-flex;align-items:center;gap:5px">' +
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">' +
+      '<circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2"/>' +
+      '<path d="M15.6 15.6 L20.5 20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>' +
+      '</svg><span>路由</span></span>';
     b.setAttribute("data-dreach-top", "1");
     b.removeAttribute("id");
     b.title = "d-reach 路由（Alt+R）";
@@ -231,7 +242,35 @@ PAGE = r"""<!doctype html>
 
   /* ---- 主卡片：照 magpie 的 .rt ---- */
   .rt{background:var(--card);border:1px solid var(--line);border-radius:14px;
-      padding:14px 16px 12px;margin:0 0 16px;box-shadow:var(--card-edge);overflow:hidden}
+      padding:14px 16px 12px;margin:0 0 16px;box-shadow:var(--card-edge);overflow:hidden;
+      container-type:inline-size}
+
+  /* magpie 的做法：按「容器自身宽度」适配，而不是视口。塞进 460px 抽屉时
+     视口仍是 1400px，media query 不触发，原来会挤成三列 —— 所以用容器查询。 */
+  @container (max-width: 560px) {
+    .rt-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:20px;
+      row-gap:18px;padding:14px 0 4px}
+    .rt-stage .rt-node{padding:10px 6px 8px}
+    .rt-stage .rt-node .glyph{font-size:17px;margin-bottom:1px}
+    .rt-accts{grid-column:1 / -1;padding-left:18px;max-height:none}
+    .rt-accts li{grid-template-columns:10px minmax(0,1fr);row-gap:4px}
+    .rt-accts li .right{grid-column:2;text-align:left}
+    .rt-accts li .bar{grid-column:2}
+    .rt-wires{display:none}
+    .rt-foot{flex-direction:column;align-items:stretch;gap:10px}
+    .stats{justify-content:flex-start;text-align:left;gap:20px}
+    .stats b{font-size:20px}
+    .rt-what,.rt-mode{font-size:12.5px}
+  }
+  @container (max-width: 380px) {
+    .rt-accts li .nm small{display:none}
+    .rt-stage{grid-template-columns:1fr;row-gap:10px}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .card,.rt-node,iframe{animation:none!important;transition:none!important}
+    .rt-wires path.live{animation:none}
+  }
   .rt-top{display:flex;flex-direction:column;gap:3px}
   .rt-what{font-size:13px;color:var(--muted);margin:0}
   .rt-what b{color:var(--fg);font-weight:600}
@@ -346,22 +385,6 @@ PAGE = r"""<!doctype html>
 
   @media(max-width:860px){
     .wrap{padding:14px 12px 36px}
-    .rt{padding:12px 12px 10px}
-    /* 单列：两个节点横排一行，通道列表整行在下，连线直接关掉 */
-    .rt-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:10px;
-      row-gap:10px;padding:14px 0}
-    .rt-stage .rt-node{padding:9px 6px 8px}
-    .rt-stage .rt-node b{font-size:12px}
-    .rt-stage .rt-node small{font-size:10.5px}
-    .rt-stage .rt-node .glyph{font-size:17px;margin-bottom:1px}
-    .rt-accts{grid-column:1 / -1;max-height:none;width:100%}
-    .rt-wires{display:none}
-    .rt-foot{gap:12px}
-    .stats{gap:18px}
-    .stats b{font-size:20px}
-    .rt-accts li{grid-template-columns:10px minmax(0,1fr) auto;column-gap:8px;padding:8px 10px}
-    .rt-accts li .right{max-width:42%}
-    .rt-accts li .bar{grid-column:2 / -1}
     .bar2 input{flex:1 1 100%;min-width:0}
     .bar2 select,.bar2 button{flex:0 0 auto}
   }
