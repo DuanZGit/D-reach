@@ -45,10 +45,37 @@ NO_KEY_PAGE = """<!doctype html><meta charset="utf-8"><title>需要访问 key</t
      或在能登录的终端跑 <code>cat ~/.agent-reach/gateway.key</code> 取。</p>
 </div></body>"""
 
+MANIFEST = """{
+  "name": "d-reach 路由",
+  "short_name": "d-reach",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f2f5",
+  "theme_color": "#1c1c21",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}"""
+
+ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="42" fill="#1c1c21"/>
+  <circle cx="60" cy="96" r="12" fill="#189a58"/>
+  <circle cx="132" cy="60" r="9" fill="#ffffff" opacity=".85"/>
+  <circle cx="132" cy="96" r="9" fill="#ffffff" opacity=".85"/>
+  <circle cx="132" cy="132" r="9" fill="#ffffff" opacity=".85"/>
+  <path d="M72 96 H120" stroke="#189a58" stroke-width="4" fill="none"/>
+  <path d="M72 96 C 96 96 96 60 120 60" stroke="#ffffff" stroke-width="3" fill="none" opacity=".55"/>
+  <path d="M72 96 C 96 96 96 132 120 132" stroke="#ffffff" stroke-width="3" fill="none" opacity=".55"/>
+</svg>"""
+
 PAGE = r"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>d-reach</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#1c1c21">
+<link rel="apple-touch-icon" href="./icon.svg">
 <style>
   :root{
     --font: system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
@@ -633,6 +660,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, '{"error":"forbidden"}', "application/json")
         if path == "/":
             self._send(200, PAGE, "text/html; charset=utf-8")
+        elif path == "/manifest.webmanifest":
+            self._send(200, MANIFEST, "application/manifest+json; charset=utf-8")
+        elif path in ("/icon.svg", "/icons/icon.svg"):
+            self._send(200, ICON, "image/svg+xml; charset=utf-8")
         elif path == "/api/state":
             self._send(200, json.dumps(state(), ensure_ascii=False), "application/json")
         else:
