@@ -28,3 +28,6 @@ __pycache__/
 
 # Encrypted credential bundle (never ship in a public repo)
 secrets.enc
+
+# Local dev link for module resolution during tests
+node_modules/
