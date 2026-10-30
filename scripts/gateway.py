@@ -56,7 +56,14 @@ DRAWER_JS = r"""
 
   function boot() {
 
+  // 同域入口优先（走 Caddy 的 /reach/，复用 pi-web 登录态）；
+  // 万一直开 127.0.0.1:30142（没经过 Caddy）则退回本机网关。
+  // 3426 只绑 127.0.0.1，外部访问不到，所以回退不额外开洞。
   var REACH = "/reach/";
+  var REACH_FALLBACK = "http://127.0.0.1:3426/";
+  var probe = fetch(REACH + "api/state", { method: "GET" })
+    .then(function (r) { if (!r.ok) REACH = REACH_FALLBACK; })
+    .catch(function () { REACH = REACH_FALLBACK; });
   var style = document.createElement("style");
   style.textContent = [
     "#dreach-fab{position:fixed;right:18px;bottom:18px;z-index:2147483000;width:46px;height:46px;",
@@ -103,7 +110,10 @@ DRAWER_JS = r"""
 
   var frame = panel.querySelector("#dreach-frame"), loaded = false;
   function open() {
-    if (!loaded) { frame.src = REACH; loaded = true; }
+    if (!loaded) {
+      loaded = true;
+      probe.then(function () { frame.src = REACH; });
+    }
     panel.classList.add("on"); mask.classList.add("on"); fab.classList.add("hide");
   }
   function close() {
@@ -111,7 +121,7 @@ DRAWER_JS = r"""
   }
   fab.onclick = open; mask.onclick = close;
   panel.querySelector("#dreach-close").onclick = close;
-  panel.querySelector("#dreach-tab").onclick = function () { window.open(REACH, "_blank", "noopener"); };
+  panel.querySelector("#dreach-tab").onclick = function () { probe.then(function () { window.open(REACH, "_blank", "noopener"); }); };
   document.addEventListener("keydown", function (e) {
     if (e.altKey && (e.key === "r" || e.key === "R")) { e.preventDefault(); panel.classList.contains("on") ? close() : open(); }
     else if (e.key === "Escape" && panel.classList.contains("on")) close();
@@ -129,16 +139,24 @@ DRAWER_JS = r"""
     b.onclick = open;
     menu.appendChild(b);
   }
-  // 顶部工具栏：找到文本是「工具」的那个按钮，克隆一个放它后面，
-  // 这样样式和 pi-web 自己的一模一样，也不依赖它的类名（改了也能用）
+  // 顶部工具栏：找到文本是「系统」「工具」的两个按钮，确认它们同父（那就是顶部栏，
+  // 而不是侧边栏里的同名菜单项），再克隆一个「工具」放它后面 ——
+  // 样式和 pi-web 自己的一模一样，也不依赖它的类名（改了也能用）。
   function topEntry() {
     if (document.querySelector("[data-dreach-top]")) return;
-    var btns = Array.prototype.slice.call(document.querySelectorAll("button, a"));
-    var anchor = btns.filter(function (b) {
-      var tx = (b.textContent || "").replace(/\s+/g, "");
-      return tx === "工具" || tx === "系统";
-    })[0];
+    function byText(names) {
+      var all = Array.prototype.slice.call(document.querySelectorAll("button, a"));
+      return all.filter(function (b) {
+        if (b.hasAttribute("data-dreach-top")) return false;
+        var tx = (b.textContent || "").replace(/\s+/g, "");
+        return names.indexOf(tx) >= 0;
+      })[0];
+    }
+    // pi-web 的顶栏文案跟随界面语言：中文「系统/工具」，英文「System/Tools」
+    var tool = byText(["工具", "Tools", "Tools面板"]), sys = byText(["系统", "System"]);
+    var anchor = tool || sys;
     if (!anchor || !anchor.parentElement) return;
+    if (tool && sys && tool.parentElement !== sys.parentElement) return; // 不是同一条工具栏，先别动
     var b = anchor.cloneNode(false);
     b.innerHTML = '<span style="display:inline-flex;align-items:center;gap:5px">' +
       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">' +
@@ -147,7 +165,7 @@ DRAWER_JS = r"""
       '</svg><span>路由</span></span>';
     b.setAttribute("data-dreach-top", "1");
     b.removeAttribute("id");
-    b.title = "d-reach 路由（Alt+R）";
+    b.title = "d-reach 路由与额度（Alt+R）";
     b.onclick = open;
     anchor.parentElement.insertBefore(b, anchor.nextSibling);
   }

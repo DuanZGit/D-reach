@@ -18,16 +18,21 @@ import sys
 WEB = pathlib.Path.home() / ".npm-global/lib/node_modules/@agegr/pi-web"
 CHUNK_DIR = WEB / ".next/static/chunks/app"
 MARK = "__DREACH_LOADER__"
+# 直连 30142（不经过 Caddy）时 /reach/ 不存在，s.onerror 退回本机网关（3426 只绑 127.0.0.1）
 LOADER = (
     ';/* d-reach drawer */'
     '!function(){try{if(window.__DREACH_LOADER__)return;window.__DREACH_LOADER__=1;'
     'var s=document.createElement("script");s.src="/reach/drawer.js";s.async=!0;'
+    's.onerror=function(){try{var t=document.createElement("script");'
+    't.src="http://127.0.0.1:3426/drawer.js";t.async=!0;document.head.appendChild(t)}catch(e){}};'
     'document.head.appendChild(s)}catch(e){}}();'
 )
 
 
 def targets():
-    return sorted(CHUNK_DIR.glob("page-*.js")) or sorted(CHUNK_DIR.glob("layout-*.js"))
+    # layout 是全局 chunk（每个路由都加载），page 只属于首页；两个都注，
+    # loader 自己有 __DREACH_LOADER__ 幂等保护，重复注入不会重复执行。
+    return sorted(CHUNK_DIR.glob("layout-*.js")) + sorted(CHUNK_DIR.glob("page-*.js"))
 
 
 def main(argv):
