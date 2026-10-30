@@ -154,17 +154,30 @@ DRAWER_JS = r"""
         return names.indexOf(tx) >= 0;
       })[0];
     }
-    // pi-web 的顶栏文案跟随界面语言：中文「系统/工具」，英文「System/Tools」
-    var tool = byText(["工具", "Tools", "Tools面板"]), sys = byText(["系统", "System"]);
+    function byAria(names) {
+      var all = Array.prototype.slice.call(document.querySelectorAll('button[aria-label], a[aria-label]'));
+      return all.filter(function (b) {
+        if (b.hasAttribute("data-dreach-top")) return false;
+        return names.indexOf(b.getAttribute("aria-label")) >= 0;
+      })[0];
+    }
+    // pi-web 的顶栏文案跟随界面语言：中文「系统/工具」，英文「System/Tools」。
+    // 手机端展开后是纯 SVG 图标没有文字，改按 aria-label（不随语言变）找：
+    // Tool definitions=工具、System prompt=系统。
+    var tool = byText(["工具", "Tools", "Tools面板"]) ||
+      byAria(["Tool definitions"]);
+    var sys = byText(["系统", "System"]) || byAria(["System prompt"]);
     var anchor = tool || sys;
     if (!anchor || !anchor.parentElement) return;
     if (tool && sys && tool.parentElement !== sys.parentElement) return; // 不是同一条工具栏，先别动
     var b = anchor.cloneNode(false);
+    // 手机端锚点是纯 SVG 图标（无文字），跟图标风格走；桌面端带「路由」二字
+    var iconOnly = !anchor.textContent.trim();
     b.innerHTML = '<span style="display:inline-flex;align-items:center;gap:5px">' +
       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">' +
       '<circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2"/>' +
       '<path d="M15.6 15.6 L20.5 20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>' +
-      '</svg><span>路由</span></span>';
+      '</svg>' + (iconOnly ? "" : "<span>路由</span>") + '</span>';
     b.setAttribute("data-dreach-top", "1");
     b.removeAttribute("id");
     b.title = "d-reach 路由与额度（Alt+R）";
