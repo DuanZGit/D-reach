@@ -155,10 +155,12 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | BrightData | `BRIGHTDATA_APITOKEN` | brightdata.com |
 | Firecrawl | `FIRECRAWL_API_KEY` | firecrawl.dev |
 | TinyFish | `TINYFISH_API_KEY` | agent.tinyfish.ai/api-keys（search/fetch **$0/次**，30 搜/150 抓每分钟） |
-| Serper（**仅手打，fanout 不读**） | `SERPER_API_KEY` | serper.dev |
+| Serper（fanout 已接，2,500 次一次性赠送） | `SERPER_API_KEY` | serper.dev |
 | 百度千帆 | `BAIDU_API_KEY` | qianfan.console.baidu.com |
 | ScrapeCreators（**仅手打，fanout 不读**） | `SCRAPECREATORS_API_KEY` | scrapecreators.com |
 | LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
+
+> Wikipedia 不需要 key，完全免费无限量；Firecrawl /search 复用 `FIRECRAWL_API_KEY`，消耗同一份 credits。
 
 ## 可视化网关（可选，人看状态用）
 
@@ -243,9 +245,10 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 | 意图 | 首选 | 次选 | 兜底 |
 |------|------|------|------|
-| 本地生活/旅行（酒店/门票/攻略/美食/地址） | 百度千帆 | TinyFish search | BrightData（要 Google 本地结果时才上） |
-| 对比选型（vs/哪个好/值得/替代） | TinyFish search | Exa（语义） | 百度千帆 |
+| 本地生活/旅行（酒店/门票/攻略/美食/地址） | **Serper**（真 Google 结果，实测直接给票价/营业时间/热线） | Firecrawl /search | 百度千帆 |
+| 对比选型（vs/哪个好/值得/替代） | Firecrawl /search | Exa（语义） | TinyFish search |
 | 时效/天气/政策（最新/发布/价格/固件/年份） | LangSearch（限域+时效） | TinyFish search | 百度千帆 |
+| X 是什么 / 是谁 / 的历史 | **Wikipedia**（0.7s，免费无限量） | 百度千帆 | TinyFish search |
 | 中文综合/线索 | 百度千帆（AI 摘要，**不是来源**） | TinyFish search | LangSearch |
 | 英文/技术搜索 | **LangSearch**（`count=20`，限域/时效最强） | **TinyFish search**（$0/次） | Exa |
 | 代码报错/排障 | **StackExchange** ✅免 | Firecrawl Developer Index ✅免 | 掘金 / SegmentFault ✅免 |
@@ -253,7 +256,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 > **掘金/SegmentFault 只对技术问题有用**。实测拿「宜兴窑湖小镇 万圣节 烟花 门票」问它们，返回的是「掘金签约季」「MarsCode 助力烟花绽放」「云栖大会门票开抢」——字面匹配，零相关信息。非技术的中文问题走「本地生活」或「中文综合」行。
 | 学术论文 | **OpenAlex + Crossref** ✅免 | Firecrawl Research ✅免（论文端点不耗 credits） | — |
-| 编程文档/issue | Firecrawl Developer Index ✅免 | Exa | gh CLI ✅免 |
+| 编程文档/issue | Firecrawl Developer Index ✅免 | Firecrawl /search（消耗 credits） | gh CLI ✅免 |
 | 公司/人名背景 | 千帆百科星图（200/日，需手打 `dispatch`） | 百度百科词条 | Exa |
 | 深度技术讨论 | **HN Algolia** ✅免 | 掘金 / SegmentFault | — |
 | 读一个 URL（不反爬） | `curl` 直取 ✅免 | TinyFish `fetch_content`（$0，真渲染） | Jina |
