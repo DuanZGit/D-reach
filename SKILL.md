@@ -238,6 +238,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 > **✅免 = 免 Key 且不限量，不记账；⏱ = 限额通道，`fanout` 自动两段式记账（先 `check`、请求成功才 `use` 真扣，失败不扣）；⏱$0 = 需 Key 但 $0/次（TinyFish search/fetch）**
 > 表内每行的 首选/备选/兜底 是**降级链**（首选挂了才走下一列），不是三选一；L2 起要多行同时开。
+> **每个通道擅长什么、不擅长什么、代价多少 → [references/channels.md](references/channels.md)**（选路必看）
 > 完整国内通道实测清单（含不可达站点与替代链）见 **[references/cn-reach.md](references/cn-reach.md)**。
 
 | 意图 | 首选 | 次选 | 兜底 |
@@ -444,6 +445,7 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 
 | 文档 | 什么时候读 |
 |------|-----------|
+| [references/channels.md](references/channels.md) | **13 个通道逐个写清擅长/不擅长/代价/别用它做什么** —— 规则没命中时照着它选 `channels` |
 | [references/cn-reach.md](references/cn-reach.md) | **国内网络环境实测通道总表**（可达/不可达 + 替代链 + 细分路由）——选路前先看它 |
 | [references/search.md](references/search.md) | 搜索通道完整参数、**查询改写矩阵与分档调用序列** |
 | [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS / **抓取八档顺序与「假成功的六种形态」** |

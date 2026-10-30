@@ -87,7 +87,7 @@ const SCENES: { re: RegExp; on: string; why: string }[] = [
   },
 ];
 
-function pickByIntent(query: string): { on: string; why: string } {
+function pickByIntent(query: string): { on: string; why: string; unclear?: boolean } {
   const zh = /[\u4e00-\u9fff]/.test(query);
   for (const s of SCENES) {
     if (s.re.test(query)) return { on: s.on, why: s.why };
@@ -119,7 +119,8 @@ function pickByIntent(query: string): { on: string; why: string } {
     };
   return {
     on: "tf,fcdev,qianfan",
-    why: "通用兜底：TinyFish + Firecrawl Dev + 千帆",
+    why: "未命中已知场景，先用 TinyFish + 千帆兜底",
+    unclear: true,
   };
 }
 
@@ -276,15 +277,17 @@ async function runFanout(
   profile: Profile,
   channels: string,
   source = "",
-): Promise<{ md: string; secs: number; on: string; why: string }> {
+): Promise<{ md: string; secs: number; on: string; why: string; unclear?: boolean }> {
   const args = [FANOUT, query];
   if (profile === "deep") args.push("--deep");
   let why = "";
+  let unclear = false;
   let on = channels || PROFILES[profile].on;
   if (!on && profile === "auto") {
     const picked = pickByIntent(query);
     on = picked.on;
     why = picked.why;
+    unclear = picked.unclear === true;
   }
   if (on) args.push("--on", on);
 
@@ -298,7 +301,7 @@ async function runFanout(
     maxBuffer: 8 << 20,
     env,
   });
-  return { md: stdout, secs: (Date.now() - t0) / 1000, on, why };
+  return { md: stdout, secs: (Date.now() - t0) / 1000, on, why, unclear };
 }
 
 async function persist(md: string, tag: string): Promise<string> {
@@ -1612,7 +1615,7 @@ const searchTool = defineTool({
       };
     const profile = (params.profile ?? "auto") as Profile;
     try {
-      const { md, secs, on, why } = await runFanout(
+      const { md, secs, on, why, unclear } = await runFanout(
         query,
         profile,
         params.channels ?? "",
@@ -1622,9 +1625,17 @@ const searchTool = defineTool({
       const file = await persist(md, query);
       const perChannel =
         params.detail === "full" ? 8 : profile === "quick" ? 3 : 2;
+      // 规则没命中时必须明说自己没把握，并当场给出通道菜单 —— 让调用方
+      // 一眼能看出「工具在猜」还是「按经验走」，不用再翻文档
+      const MENU =
+        "想自己指定就传 channels：qianfan 中文综述(非来源) / tf 全网 / " +
+        "fcdev 官方文档 / se 报错 / hn 技术观点 / jj,segfault 中文技术(仅技术) / " +
+        "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
+        "fcres 论文全文 / bd Google(最贵最慢)";
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
-        (why ? ` · ${why}` : on ? ` · ${on}` : "");
+        (why ? ` · ${why}` : on ? ` · ${on}` : "") +
+        (unclear ? `\n> ${MENU}` : "");
       return {
         content: [
           {
