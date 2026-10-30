@@ -73,6 +73,8 @@ DRAWER_JS = r"""
     "transition:transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s}",
     "#dreach-fab:hover{transform:translateY(-2px)}",
     "#dreach-fab.hide{opacity:0;pointer-events:none}",
+    // 窄屏/触屏：输入法和底部状态栏挤在一起，浮动球挡内容，直接不显示
+    "@media (max-width:820px),(pointer:coarse){#dreach-fab{display:none}}",
     "#dreach-mask{position:fixed;inset:0;z-index:2147482999;background:rgba(0,0,0,.28);",
     "opacity:0;pointer-events:none;transition:opacity .24s}",
     "#dreach-mask.on{opacity:1;pointer-events:auto}",
