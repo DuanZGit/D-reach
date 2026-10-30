@@ -3,7 +3,7 @@
  *
  * 定位：skill 里那些「要读 SKILL.md 才知道怎么拼」的操作，在这里变成一次工具调用。
  *
- *   d_reach         并发检索（auto 按意图选路 / quick / base / deep）
+ *   d_reach         并发检索（auto 按场景选路 / quick / base / deep）
  *   d_reach_fetch   抓一个 URL：微信直连 / cookie 注入 / curl / Playwright / TinyFish / Jina / BrightData / archive.today
  *                   八档降级，失败按网络·反爬·付费墙·登录墙·解析分类，能说清「该不该重试」
  *   d_reach_quota   额度与通道健康（可选顺带跑一次官方校准）
@@ -39,7 +39,7 @@ const UA =
 // ---------------------------------------------------------------- 检索
 
 const PROFILES = {
-  auto: { label: "auto · 按意图选 3 路", on: "" },
+  auto: { label: "auto · 按场景选路", on: "" },
   quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
   base: { label: "base · 9 路", on: "" },
   deep: { label: "deep · 13 路", on: "" },
@@ -48,36 +48,60 @@ const PROFILES = {
 type Profile = keyof typeof PROFILES;
 
 /** 按 query 特征选通道。命中不准时用 channels 参数覆盖。 */
+// 场景路由：按真实使用场景（旅行/本地、对比选型、官方文档、硬件 AV…）分档。
+// 规则来自 40 次历史 d_reach 调用的实际 query 分布 —— 之前「中文通用」走
+// qianfan,jj,segfault，查酒店/门票/天气全落到掘金和 SegmentFault 两个程序员
+// 社区，是最大的误判来源。
+const SCENES: { re: RegExp; on: string; why: string }[] = [
+  {
+    re: /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述|doi|citation)/i,
+    on: "oalex,crossref,fcres",
+    why: "学术：OpenAlex + Crossref + Research Index",
+  },
+  {
+    // 「宜兴 窑湖小镇 万圣节 活动 门票 2026」也含 2026，本地生活必须排在时效前面，
+    // 否则「汉庭 窑湖小镇 携程 价格 距离」会被「价格」抢去走时效通道
+    re: /(攻略|门票|开放时间|景点|酒店|民宿|住宿|自驾|美食|餐厅|咖啡|附近|地址|门店|营业|入住|景点|演出|展览|活动|烟花|周末去哪)/,
+    on: "qianfan,tf",
+    why: "本地生活/旅行：千帆 + TinyFish（deep 档再加 BrightData 补 Google 本地结果）",
+  },
+  {
+    re: /(\bvs\.?\b|对比|区别|哪个好|哪个更|替代|选型|值得买|值不值|还是)/i,
+    on: "tf,exa,qianfan",
+    why: "对比/选型：TinyFish + Exa 语义 + 千帆",
+  },
+  {
+    re: /(最新|今天|昨天|本周|明天|后天|发布|上线|价格|股价|行情|天气|气温|降雨|预报|weather|forecast|release|changelog|政策|固件|版本更新|202[5-9])/i,
+    on: "langsearch,tf,qianfan",
+    why: "时效/天气/政策：LangSearch + TinyFish + 千帆",
+  },
+  {
+    re: /(\bapi\b|\bsdk\b|文档|参数|接口|用法|怎么用|how to use|reference|man ?page|\buri\b|callnative|示例代码|官方文档)/i,
+    on: "fcdev,qianfan,tf",
+    why: "官方文档/API：Firecrawl Dev 索引 + 千帆 + TinyFish",
+  },
+  {
+    re: /(error|exception|traceback|stack ?trace|报错|排查|卡住|报错|不生效|失败|编译|部署|配置|安装|依赖|端口冲突|超时|崩溃)/i,
+    on: "se,fcdev,qianfan",
+    why: "排障：StackExchange + Firecrawl Dev + 千帆",
+  },
+];
+
 function pickByIntent(query: string): { on: string; why: string } {
   const zh = /[\u4e00-\u9fff]/.test(query);
-  const paper = /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述)/i.test(
-    query,
-  );
-  // 「明天/后天/天气」这类问题也是时效性的，原先没进 news 分支，
-  // 于是掉进中文兜底 → 掘金 + SegmentFault 两个程序员社区，查天气完全跑偏
-  const news =
-    /(最新|今天|昨天|本周|明天|后天|发布|上线|价格|股价|行情|天气|气温|降雨|预报|weather|forecast|release|changelog|202[5-9])/i.test(
+  for (const s of SCENES) {
+    if (s.re.test(query)) return { on: s.on, why: s.why };
+  }
+  // 技术词表：加了 AV/硬件/自建服务，否则「mpv-android truehd passthrough」
+  // 这种会掉进通用兜底，拿不到 SuperUser 那类讨论
+  const tech =
+    /\b(mtu|wireguard|docker|compose|k8s|kubernetes|python|java|rust|golang|node|api|sdk|http|tcp|udp|sql|git|nginx|redis|kafka|postgres|mysql|linux|bug|fix|mqtt|spdif|passthrough|bitstream|truehd|atmos|dts|codec|hdr|ffmpeg|mpv|vlc|plex|jellyfin|home ?assistant|nas|ssh|systemd|curl|json|yaml)\b/i.test(
       query,
     );
   const code =
-    /(error|exception|traceback|stack ?trace|compile|build|报错|编译|部署|配置|安装|依赖|函数)/i.test(
+    /(error|exception|traceback|compile|build|报错|编译|部署|配置|安装|依赖|函数)/i.test(
       query,
     );
-  const tech =
-    /\b(mtu|wireguard|docker|k8s|kubernetes|python|java|rust|golang|node|api|sdk|http|tcp|udp|sql|git|nginx|redis|kafka|postgres|mysql|linux|bug|fix)\b/i.test(
-      query,
-    );
-
-  if (paper)
-    return {
-      on: "oalex,crossref,fcres",
-      why: "学术：OpenAlex + Crossref + Research Index",
-    };
-  if (news)
-    return {
-      on: "langsearch,tf,qianfan",
-      why: "时效/天气：LangSearch + TinyFish + 千帆",
-    };
   if (zh && (code || tech))
     return {
       on: "qianfan,se,jj",
@@ -85,13 +109,13 @@ function pickByIntent(query: string): { on: string; why: string } {
     };
   if (zh)
     return {
-      on: "qianfan,jj,segfault",
-      why: "中文通用：千帆 + 掘金 + SegmentFault",
+      on: "qianfan,tf",
+      why: "中文通用：千帆 + TinyFish",
     };
   if (code || tech)
     return {
-      on: "se,fcdev,tf",
-      why: "英文技术：StackExchange + Firecrawl Dev + TinyFish",
+      on: "se,fcdev,hn",
+      why: "英文技术/硬件：StackExchange + Firecrawl Dev + HN",
     };
   return {
     on: "tf,fcdev,qianfan",
@@ -1541,9 +1565,16 @@ const searchTool = defineTool({
   name: "d_reach",
   label: "d-reach 检索",
   description:
-    "多通道并发检索：中文走百度千帆、代码走 Firecrawl/StackExchange、通用走 TinyFish/LangSearch。" +
-    "profile=auto（默认）按 query 意图自动选 3 路；quick 固定 3 路；base 9 路；deep 13 路含限额通道。" +
-    "返回精简摘要，完整来源写到 details.file。",
+    "多通道并发检索。profile=auto（默认）按场景自动选 2-3 路，场景→通道对照表：" +
+    "本地生活/旅行（酒店/门票/攻略/美食/地址）→ qianfan,tf；" +
+    "对比选型（vs/对比/哪个好/值得）→ tf,exa,qianfan；" +
+    "时效天气政策（最新/发布/价格/固件/年份）→ langsearch,tf,qianfan；" +
+    "官方文档/API（api/sdk/文档/参数/用法）→ fcdev,qianfan,tf；" +
+    "排障（报错/卡住/不生效/端口冲突）→ se,fcdev,qianfan；" +
+    "学术（论文/arxiv/survey）→ oalex,crossref,fcres；" +
+    "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
+    "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）。" +
+    "quick 固定 3 路；base 9 路；deep 13 路含限额通道。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
     profile: Type.Optional(
@@ -1556,7 +1587,7 @@ const searchTool = defineTool({
         ],
         {
           description:
-            "auto=按意图选 3 路（默认）；quick=固定 3 路；base=9 路；deep=13 路",
+            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=9 路；deep=13 路",
         },
       ),
     ),
