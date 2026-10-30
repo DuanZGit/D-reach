@@ -242,10 +242,15 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 | 意图 | 首选 | 次选 | 兜底 |
 |------|------|------|------|
+| 本地生活/旅行（酒店/门票/攻略/美食/地址） | 百度千帆 | TinyFish search | BrightData（要 Google 本地结果时才上） |
+| 对比选型（vs/哪个好/值得/替代） | TinyFish search | Exa（语义） | 百度千帆 |
+| 时效/天气/政策（最新/发布/价格/固件/年份） | LangSearch（限域+时效） | TinyFish search | 百度千帆 |
 | 中文综合/线索 | 百度千帆（AI 摘要，**不是来源**） | TinyFish search | LangSearch |
 | 英文/技术搜索 | **LangSearch**（`count=20`，限域/时效最强） | **TinyFish search**（$0/次） | Exa |
 | 代码报错/排障 | **StackExchange** ✅免 | Firecrawl Developer Index ✅免 | 掘金 / SegmentFault ✅免 |
 | 中文技术长尾 | **掘金 + SegmentFault** ✅免 | 百度千帆 | — |
+
+> **掘金/SegmentFault 只对技术问题有用**。实测拿「宜兴窑湖小镇 万圣节 烟花 门票」问它们，返回的是「掘金签约季」「MarsCode 助力烟花绽放」「云栖大会门票开抢」——字面匹配，零相关信息。非技术的中文问题走「本地生活」或「中文综合」行。
 | 学术论文 | **OpenAlex + Crossref** ✅免 | Firecrawl Research ✅免（论文端点不耗 credits） | — |
 | 编程文档/issue | Firecrawl Developer Index ✅免 | Exa | gh CLI ✅免 |
 | 公司/人名背景 | 千帆百科星图（200/日，需手打 `dispatch`） | 百度百科词条 | Exa |
