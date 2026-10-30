@@ -33,6 +33,8 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 | `yt-dlp` | 否 | 视频字幕（B站/YouTube） | `pipx install yt-dlp` |
 | `bili` / `xhs` / `twitter-cli` | 否 | 社交平台登录态抓取 | 见 `references/social.md` |
 | `opencli` | 否 | 电商/雪球等适配器（需 Chrome 桥） | `npm i -g @jackwener/opencli`（本机 2.0.2；2.x 默认输出 JSON，`-f yaml` 仍可用） |
+| `node` + `playwright` | 否 | 抓取链的第 ④ 档：本地真浏览器渲染（跑完 JS 的 DOM / iframe / Shadow DOM）。没装就跳过这档 | `npm i -g playwright && npx playwright install chromium`（约 170MB） |
+| `pymupdf` | 否 | PDF 直链抽文字层；没装就只能报「需 OCR / 自己下下来看」 | `pip install pymupdf` |
 | `baiduaisearchwithquota` 技能 | 否 | 千帆那一路（400 次/日）。**不在本仓里**，需单独装；目录名也接受 `baidu-ai-search`（同一包不同 slug）。两者都没有时 fanout 只标 err 跳过该路 | `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota` |
 
 > 千帆是**独立技能**，不在本仓里，clone 本仓不会带上它。缺它只少 1 路，其余 12 路照跑。

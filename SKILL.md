@@ -28,7 +28,8 @@ upstream:
 ---
 
 > **pi 用户**：本技能另有一个插件版（`pi-extension/d-reach.ts`），三件事已做成原生工具：
-> `d_reach`（检索，auto/quick/base/deep 四档）、`d_reach_fetch`（抓 URL，四档自动降级）、
+> `d_reach`（检索，auto/quick/base/deep 四档）、`d_reach_fetch`（抓 URL，八档自动降级：
+> 微信直连 → cookie 注入 → curl → **Playwright 本地渲染** → TinyFish → Jina → BrightData → archive.today）、
 > `d_reach_quota`（额度+健康）、`d_reach_social`（B站/小红书登录态体检与搜索）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
 >
 > **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
@@ -54,6 +55,12 @@ upstream:
 
 ## 决策流程（默认 L2，见下节）
 
+0. **先问一句：下游能不能自己吃这个 URL** —— 抓取是最后手段，不是第一手段。
+   命中以下任一条就直接跳过抓取：
+   - 消费方原生支持该 URL（NotebookLM 对 YouTube、多数模型对公开网页）
+   - 目标站有官方接口 / CLI（B站 `bili`、GitHub `gh`、雪球/巨潮接口、RSS）
+   - 用户手上就有原文（他贴过来比我抓一遍便宜得多）
+   - 已经有人存过公开存档（`archive.ph`）
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
    L2 起一律走它：**默认档 9 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
@@ -434,7 +441,7 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 |------|-----------|
 | [references/cn-reach.md](references/cn-reach.md) | **国内网络环境实测通道总表**（可达/不可达 + 替代链 + 细分路由）——选路前先看它 |
 | [references/search.md](references/search.md) | 搜索通道完整参数、**查询改写矩阵与分档调用序列** |
-| [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS |
+| [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS / **抓取八档顺序与「假成功的六种形态」** |
 | [references/social.md](references/social.md) | 微博 / V2EX / Reddit / 公众号 / 豆瓣 / 知乎 |
 | [references/dev.md](references/dev.md) | gh CLI / DeepWiki / StackExchange / 掘金 完整用法 |
 | [references/video.md](references/video.md) | YouTube / B站 / 播客字幕 |

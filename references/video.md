@@ -49,6 +49,29 @@ bili audio BVxxx                 # 导出 ASR-ready 分段 WAV
 `pipx install faster-whisper` 或改用 `browser_use` 拿平台自带 AI 摘要）。
 （原小宇宙 `transcribe.sh` 依赖 `~/.agent-reach/tools/`，本机不存在，已删。）
 
+### 备查：Get笔记 API 转写（未接入，先用前评估）
+
+不需自建 ASR，把链接丢给它，它建任务、转写、返全文。一个接口覆盖小宇宙 / 喜马拉雅 / B站，
+把「whisper 没装 + yt-dlp 未跑通」这一大块缺口一次补上。**目前只记在这里，代码未接。**
+
+流程（来自 `qiaomu-anything-to-notebooklm/scripts/get_podcast_transcript.py`）：
+
+1. 建链接笔记：`POST https://openapi.biji.com/open/api/v1/resource/note/save`
+   体 `{"note_type":"link","link_url":"<URL>"}` → 回 `task_id`
+   头需要 `Authorization: <GETNOTE_API_KEY>` + `X-Client-ID: <GETNOTE_CLIENT_ID>`
+2. 轮询：`POST .../note/task/progress` 体 `{"task_id":...}` → `status` 为 `success` / `failed` / 进行中
+   原脚本是 **30 秒一轮、最多 40 轮**（最长 20 分钟）
+3. 取全文：`GET https://get-notes.luojilab.com/voicenotes/web/notes/<note_id>/links/detail`
+   这一步用的是 **从浏览器抓的 JWT**（`Authorization: Bearer`），不是上面的 API key
+
+代价与坑：
+
+- 要两个凭据 + 一次浏览器 JWT；refresh_token **90 天过期**，过期后得重新从浏览器抓
+- 转写是异步的，不适合「马上要」的场景；先告诉用户要等
+- 有平台配额 / 计费，用前先确认
+- 只要字幕不要全文时，先试平台自带的（`bili video BVxxx -s --yaml`、`bili video BVxxx --ai`），
+  比走转写快且免费
+
 ### 零配置兜底：B站搜索 API 直连
 
 ```bash
