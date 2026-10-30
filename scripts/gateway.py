@@ -73,8 +73,8 @@ DRAWER_JS = r"""
     "transition:transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s}",
     "#dreach-fab:hover{transform:translateY(-2px)}",
     "#dreach-fab.hide{opacity:0;pointer-events:none}",
-    // 窄屏/触屏：浮动球缩到 36px、半透明、贴边，低打扰（打字时被输入法盖住无妨，收起即见）
-    "@media (max-width:820px),(pointer:coarse){#dreach-fab{width:34px;height:34px;right:10px;bottom:12px;opacity:.5;box-shadow:0 2px 8px rgba(0,0,0,.18)}#dreach-fab:hover{opacity:.9;transform:none}}",
+    // 窄屏/触屏：浮动球不显示 —— 入口在侧栏底部操作条（模型/技能/设置 同排的「路由」）
+    "@media (max-width:820px),(pointer:coarse){#dreach-fab{display:none}}",
     "#dreach-mask{position:fixed;inset:0;z-index:2147482999;background:rgba(0,0,0,.28);",
     "opacity:0;pointer-events:none;transition:opacity .24s}",
     "#dreach-mask.on{opacity:1;pointer-events:auto}",
@@ -185,9 +185,28 @@ DRAWER_JS = r"""
     anchor.parentElement.insertBefore(b, anchor.nextSibling);
   }
 
+  // 侧栏底部操作条（模型/技能/设置）追加「路由」：flex:1 均分，原生风格，手机桌面通用。
+  // React 重渲染会吃掉它，MutationObserver 会重插 —— 与顶栏入口同一套生命周期。
+  function sideEntry() {
+    if (document.querySelector("[data-dreach-side]")) return;
+    var all = Array.prototype.slice.call(document.querySelectorAll('button[aria-label="Settings"], button[aria-label="设置"]'));
+    var st = all.filter(function (b) { return !b.hasAttribute("data-dreach-side"); })[0];
+    if (!st || !st.parentElement) return;
+    var b = st.cloneNode(false);
+    b.innerHTML = st.innerHTML
+      .replace(/<span[^>]*>[^<]*<\/span>/, '<span>路由</span>')   // 文字段
+      .replace(/title="[^"]*"/, "");
+    b.setAttribute("data-dreach-side", "1");
+    b.setAttribute("aria-label", "d-reach 路由");
+    b.title = "d-reach 路由与额度";
+    b.onclick = function (e) { e.preventDefault(); e.stopPropagation(); open(); };
+    st.parentElement.appendChild(b);
+  }
+
   function attach() {
     menuEntry();
     topEntry();
+    sideEntry();
   }
 
   var queued = false;
