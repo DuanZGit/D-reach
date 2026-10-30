@@ -353,6 +353,18 @@ python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
 import json, os, re, sys, html, pathlib, time
 from datetime import datetime, timezone
 
+# 收集本轮全部输出，历史详情（网关点一条看全文）要用 —— 覆盖 print 而不是到处插 buf.append
+_REAL_PRINT = print
+_OUT = []
+def print(*a, **k):
+    import io as _io
+    _b = _io.StringIO()
+    k2 = dict(k); k2["file"] = _b
+    _REAL_PRINT(*a, **k2)
+    _OUT.append(_b.getvalue())
+    if k.get("file") is sys.stdout or "file" not in k:
+        _REAL_PRINT(*a)
+
 tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
 N = max(1, min(N, 20))
 ONLY = {c for c in ON.split(",") if c} if ON else None   # None = 全跑
@@ -866,6 +878,15 @@ try:
     # 只留最近 200 条，别让文件无限长
     keep = hist.read_text(encoding="utf-8").splitlines()[-200:]
     hist.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    # 每轮的完整 markdown 落一份，网关「点历史看详情」用
+    # 文件名用 ts 前缀（精度到秒，与 rec.ts 对得上）；留 30 份
+    rdir = pathlib.Path(os.path.expanduser("~/.agent-reach/rounds"))
+    rdir.mkdir(parents=True, exist_ok=True)
+    stamp = rec["ts"].replace("-", "").replace(":", "").replace("T", "-").split("+")[0]
+    (rdir / f"{stamp}.md").write_text("".join(_OUT), encoding="utf-8")
+    olds = sorted(rdir.glob("*.md"))
+    for o in olds[:-30]:
+        o.unlink(missing_ok=True)
 except Exception:
     pass
 PY
