@@ -73,8 +73,8 @@ DRAWER_JS = r"""
     "transition:transform .18s cubic-bezier(.2,.8,.2,1),opacity .18s}",
     "#dreach-fab:hover{transform:translateY(-2px)}",
     "#dreach-fab.hide{opacity:0;pointer-events:none}",
-    // 窄屏/触屏：输入法和底部状态栏挤在一起，浮动球挡内容，直接不显示
-    "@media (max-width:820px),(pointer:coarse){#dreach-fab{display:none}}",
+    // 窄屏/触屏：浮动球缩到 36px、半透明、贴边，低打扰（打字时被输入法盖住无妨，收起即见）
+    "@media (max-width:820px),(pointer:coarse){#dreach-fab{width:34px;height:34px;right:10px;bottom:12px;opacity:.5;box-shadow:0 2px 8px rgba(0,0,0,.18)}#dreach-fab:hover{opacity:.9;transform:none}}",
     "#dreach-mask{position:fixed;inset:0;z-index:2147482999;background:rgba(0,0,0,.28);",
     "opacity:0;pointer-events:none;transition:opacity .24s}",
     "#dreach-mask.on{opacity:1;pointer-events:auto}",
