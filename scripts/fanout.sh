@@ -290,8 +290,12 @@ fi
 wait
 
 # ---------- 渲染 ----------
+# 本轮起始时间：给 history.jsonl 算耗时用（调用方已给就沿用，比如插件那边能算得更准）
+[ -n "${D_REACH_T0:-}" ] || D_REACH_T0=$(date +%s)
+export D_REACH_T0
+
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
-import json, os, re, sys, html, pathlib
+import json, os, re, sys, html, pathlib, time
 from datetime import datetime, timezone
 
 tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
@@ -648,6 +652,7 @@ def save_health(h):
 health = load_health()
 now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
 def mark(key, status):
     """只记「连败几次 + 最后成败时间」。skip 不计失败，避免本轮没请求把通道判死。
 
@@ -655,6 +660,7 @@ def mark(key, status):
     真出现反复误杀再提到环境变量。
     """
     v = health.setdefault(key, {"streak_fail": 0})
+    ROUND.append({"key": key, "status": status})
     if status == "ok":
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
@@ -737,6 +743,34 @@ if weak:
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
+
+# ---------- 历史记录 ----------
+# 网关和插件都靠它显示「最近查了什么、谁发起的、哪几路给了结果」。
+# 写失败不影响本轮输出：历史只是附加物。
+try:
+    hist = pathlib.Path(os.path.expanduser("~/.agent-reach/history.jsonl"))
+    hist.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        secs = round(time.time() - float(os.environ.get("D_REACH_T0") or 0), 1)
+    except Exception:
+        secs = 0.0
+    rec = {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "query": Q,
+        "on": ON or "",
+        "deep": DEEP == "1",
+        "source": os.environ.get("D_REACH_SOURCE") or "cli",
+        "secs": secs,
+        "ok": okc, "zero": zero, "fail": len(failed), "skip": len(skipped),
+        "results": ROUND,
+    }
+    with hist.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    # 只留最近 200 条，别让文件无限长
+    keep = hist.read_text(encoding="utf-8").splitlines()[-200:]
+    hist.write_text("\n".join(keep) + "\n", encoding="utf-8")
+except Exception:
+    pass
 PY
 
 # 跑完自动校准官方额度（本地计数 ≠ 厂商剩余；校准结果写入 quota.json 的 _official 段）
