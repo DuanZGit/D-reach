@@ -395,6 +395,32 @@ PAGE = r"""<!doctype html>
   .src summary .cnt{color:var(--muted);font-size:11.5px;margin-left:auto;
     font-variant-numeric:tabular-nums}
 
+  /* ---- 最近查询（学 magpie：每条都标出是哪个来源发起的）---- */
+  .hist{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:2px 16px 10px;box-shadow:var(--card-edge);margin-top:16px}
+  .hist-hd{display:flex;align-items:center;gap:8px;padding:11px 0 8px}
+  .hist-hd h3{font-size:12.5px;margin:0;color:var(--fg-2);font-weight:600}
+  .hist-hd .cnt{color:var(--muted);font-size:11.5px;margin-left:auto;
+    font-variant-numeric:tabular-nums}
+  .hist ol{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+  .hist li{display:grid;grid-template-columns:38px minmax(0,1fr) auto 40px 44px;
+    align-items:center;column-gap:8px;padding:6px 4px;border-radius:7px;
+    font-size:12.5px;cursor:pointer;transition:background var(--morph-t)}
+  .hist li:hover{background:var(--card-2)}
+  .hist li .t{color:var(--faint);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .hist li .q{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hist li .who{color:var(--muted);font-size:11px;background:var(--card-2);
+    border:1px solid var(--line);border-radius:99px;padding:1px 7px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}
+  .hist li .r{color:var(--green);font-size:11.5px;text-align:right;
+    font-variant-numeric:tabular-nums}
+  .hist li.part .r{color:var(--amber)}
+  .hist li .s{color:var(--faint);font-size:11.5px;text-align:right;
+    font-variant-numeric:tabular-nums}
+  .hist li.empty{display:block;color:var(--muted);font-size:12.5px;padding:6px 4px 2px;
+    cursor:default}
+  .hist li.empty:hover{background:none}
+
   .grp{padding:12px 0 10px;border-top:1px solid var(--line)}
   .grp:first-of-type{border-top:none}
   .grp h5{font-size:12.5px;margin:0;font-weight:600;color:var(--fg);
@@ -485,6 +511,14 @@ PAGE = r"""<!doctype html>
     <summary>来源明细 <span class="cnt" id="srccnt"></span></summary>
     <div id="src"></div>
   </details>
+
+  <div class="hist" id="hist">
+    <div class="hist-hd">
+      <h3>最近查询</h3>
+      <span class="cnt" id="hist-cnt"></span>
+    </div>
+    <ol id="hist-list"><li class="empty">还没有记录</li></ol>
+  </div>
 </div>
 
 <script>
@@ -620,6 +654,42 @@ function drawWires(){
   }
 }
 
+async function loadHistory(){
+  try {
+    const s = await (await fetch(api('/api/history'))).json();
+    const items = s.items || [];
+    const list = $('#hist-list');
+    $('#hist-cnt').textContent = items.length ? items.length + ' 条' : '';
+    if (!items.length) { list.innerHTML = '<li class="empty">还没有记录</li>'; return; }
+    list.innerHTML = items.map(function (it, i) {
+      const t = (it.ts || '').slice(11, 16);
+      const tot = (it.ok || 0) + (it.zero || 0) + (it.fail || 0) + (it.skip || 0);
+      const src = (it.source || 'cli').replace(/^pi:/, '');
+      const cls = (it.fail || 0) > 0 ? 'part' : 'all';
+      return '<li data-i="' + i + '" class="' + cls + '">' +
+        '<span class="t">' + esc(t) + '</span>' +
+        '<span class="q">' + esc(it.query || '') + '</span>' +
+        '<span class="who">' + esc(src) + '</span>' +
+        '<span class="r">' + (it.ok || 0) + '/' + tot + '</span>' +
+        '<span class="s">' + (it.secs || 0) + 's</span></li>';
+    }).join('');
+    // 点一条回填搜索框，免得手敲
+    list.onclick = function (e) {
+      const li = e.target.closest('li[data-i]');
+      if (!li) return;
+      const it = items[Number(li.dataset.i)];
+      if (it && it.query) { $('#q').value = it.query; $('#q').focus(); }
+    };
+    // 左侧节点显示最近一次：查了什么、谁发起的（magpie 那边是 agent + group）
+    const last = items[0];
+    if (last) {
+      const q = last.query || '';
+      $('#node-q').textContent = q.length > 12 ? q.slice(0, 12) + '…' : q;
+      $('#node-tier').textContent = (last.source || 'cli').replace(/^pi:/, '').slice(0, 16) || '—';
+    }
+  } catch (e) { /* 历史是附加物，取不到不影响主流程 */ }
+}
+
 async function loadState(){
   try {
     const s = await (await fetch(api('/api/state'))).json();
@@ -709,6 +779,7 @@ async function run(){
     $('#srcbox').open = true;
     render();
     requestAnimationFrame(function () { flyAll(); });   // 等连线画好再飞
+    loadHistory();                                       // 刚跑完这一轮也要进历史
   } catch (e) {
     $('#node-pill').textContent = '失败';
     $('#foot-note').textContent = '失败：' + e.message;
@@ -794,6 +865,7 @@ $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
 $('#refresh').onclick = loadState;
 window.addEventListener('resize', () => drawWires());
 loadState();
+loadHistory();
 setInterval(loadState, 5000);
 </script></body></html>
 """
@@ -804,6 +876,26 @@ def load_json(p):
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def history(limit=30):
+    """最近几次查询。数据来自 fanout.sh 每轮追加的 history.jsonl。"""
+    p = DATA / "history.jsonl"
+    if not p.exists():
+        return {"items": []}
+    out = []
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines()[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except Exception:
+                continue
+    except Exception:
+        return {"items": []}
+    return {"items": list(reversed(out))}
 
 
 def channel_meta():
@@ -863,7 +955,8 @@ def search(body):
         cmd += ["--on", str(body["on"])]
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                           env={**os.environ, "D_REACH_SOURCE": "web"})
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "超时（180s）"}
     return {"ok": r.returncode == 0, "markdown": r.stdout,
@@ -917,6 +1010,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, ICON, "image/svg+xml; charset=utf-8")
         elif path == "/api/state":
             self._send(200, json.dumps(state(), ensure_ascii=False), "application/json")
+        elif path == "/api/history":
+            self._send(200, json.dumps(history(), ensure_ascii=False), "application/json")
         else:
             self._send(404, '{"error":"not found"}', "application/json")
 

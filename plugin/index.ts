@@ -53,8 +53,10 @@ function pickByIntent(query: string): { on: string; why: string } {
   const paper = /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述)/i.test(
     query,
   );
+  // 「明天/后天/天气」这类问题也是时效性的，原先没进 news 分支，
+  // 于是掉进中文兜底 → 掘金 + SegmentFault 两个程序员社区，查天气完全跑偏
   const news =
-    /(最新|今天|昨天|本周|发布|上线|价格|股价|行情|release|changelog|202[5-9])/i.test(
+    /(最新|今天|昨天|本周|明天|后天|发布|上线|价格|股价|行情|天气|气温|降雨|预报|weather|forecast|release|changelog|202[5-9])/i.test(
       query,
     );
   const code =
@@ -74,7 +76,7 @@ function pickByIntent(query: string): { on: string; why: string } {
   if (news)
     return {
       on: "langsearch,tf,qianfan",
-      why: "时效：LangSearch + TinyFish + 千帆",
+      why: "时效/天气：LangSearch + TinyFish + 千帆",
     };
   if (zh && (code || tech))
     return {
@@ -226,10 +228,30 @@ function renderSearch(
   return lines.join("\n");
 }
 
+/**
+ * 这次查询是谁发起的 —— 网关的历史列表靠它区分「哪个会话、哪个项目」。
+ * 拿不到就退成 pi:unknown，不影响检索本身。
+ */
+function sourceTag(ctx: any): string {
+  try {
+    const sm = ctx?.sessionManager;
+    const id: string = sm?.getSessionId?.() ?? "";
+    const name: string = sm?.getSessionName?.() ?? "";
+    const cwd: string = sm?.getCwd?.() ?? "";
+    const base = cwd ? cwd.split("/").filter(Boolean).pop() ?? "" : "";
+    const who = name || base;
+    const bits = [who, id.slice(0, 8)].filter(Boolean);
+    return "pi:" + (bits.join("@") || "unknown");
+  } catch {
+    return "pi:unknown";
+  }
+}
+
 async function runFanout(
   query: string,
   profile: Profile,
   channels: string,
+  source = "",
 ): Promise<{ md: string; secs: number; on: string; why: string }> {
   const args = [FANOUT, query];
   if (profile === "deep") args.push("--deep");
@@ -243,9 +265,14 @@ async function runFanout(
   if (on) args.push("--on", on);
 
   const t0 = Date.now();
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (source) env.D_REACH_SOURCE = source;
+  // 插件这边的 t0 比 fanout.sh 自己算的准（含进程启动），history 里的耗时以它为准
+  env.D_REACH_T0 = String(Math.floor(t0 / 1000));
   const { stdout } = await run("bash", args, {
     timeout: 200_000,
     maxBuffer: 8 << 20,
+    env,
   });
   return { md: stdout, secs: (Date.now() - t0) / 1000, on, why };
 }
@@ -1545,7 +1572,7 @@ const searchTool = defineTool({
     ),
   }),
 
-  async execute(_id, params) {
+  async execute(_id, params, _signal, _onUpdate, ctx) {
     const query = params.query.trim();
     if (!query)
       return {
@@ -1558,6 +1585,7 @@ const searchTool = defineTool({
         query,
         profile,
         params.channels ?? "",
+        sourceTag(ctx),
       );
       const parsed = parseFanout(md);
       const file = await persist(md, query);
@@ -1775,7 +1803,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
     if (!query) return ctx.ui.notify("用法：/reach <检索词>", "warning");
     ctx.ui.notify(`d-reach ${profile} 检索中：${query}`, "info");
     try {
-      const { md, secs } = await runFanout(query, profile, "");
+      const { md, secs } = await runFanout(query, profile, "", sourceTag(ctx));
       const parsed = parseFanout(md);
       await persist(md, query);
       ctx.ui.notify(
