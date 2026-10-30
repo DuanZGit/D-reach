@@ -463,7 +463,7 @@ PAGE = r"""<!doctype html>
   <div class="bar2">
     <input id="q" placeholder="要查什么？回车直接跑" autocomplete="off">
     <select id="mode">
-      <option value="base">默认档 · 9 路</option>
+      <option value="base">默认档 · 12 路</option>
       <option value="deep">deep · +4 路限额</option>
     </select>
     <button id="go">跑一轮</button>
@@ -472,7 +472,7 @@ PAGE = r"""<!doctype html>
   <div class="rt">
     <div class="rt-top">
       <p class="rt-what" id="what"><b>还没有查询</b> · 通道状态来自上一轮</p>
-      <p class="rt-mode" id="mode-why">免费优先：9 路免 Key 通道不限量不限次；deep 才追加 LangSearch / Exa / Firecrawl-Research / BrightData，按次记账、失败不扣。</p>
+      <p class="rt-mode" id="mode-why">免费优先：8 路完全免 Key 不限量；Serper 走 2,500 次赠送额度、Firecrawl 走 credits。deep 才追加 LangSearch / Exa / Firecrawl-Research / BrightData，按次记账、失败不扣。</p>
     </div>
 
     <div class="rt-stage" id="stage">
@@ -754,7 +754,7 @@ async function run(){
   const deep = $('#mode').value === 'deep';
   const btn = $('#go'); btn.disabled = true; btn.textContent = '跑…';
   $('#node-pill').textContent = '运行中';
-  $('#what').innerHTML = '<b>' + esc(q) + '</b> · ' + (deep ? 'deep 13 路' : '默认 9 路');
+  $('#what').innerHTML = '<b>' + esc(q) + '</b> · ' + (deep ? 'deep 16 路' : '默认 12 路');
   $('#node-q').textContent = q.length > 10 ? q.slice(0, 10) + '…' : q;
   $('#node-tier').textContent = deep ? 'deep' : 'L2';
   const t0 = Date.now();
@@ -771,7 +771,7 @@ async function run(){
     $('#s-skip').textContent = lastRun.stats.skip;
     $('#node-pill').textContent = '完成';
     $('#foot-note').textContent = '本轮耗时 ' + d.secs + 's · ' +
-      (deep ? 'deep 含 4 路限额通道（成功才记账）' : '默认档 9 路，7 路完全免 Key');
+      (deep ? 'deep 含 4 路限额通道（成功才记账）' : '默认档 12 路，8 路完全免 Key');
     renderLog(d.markdown);
     $('#src').innerHTML = renderSources(d.markdown);
     $('#srccnt').textContent = lastRun.stats.ok + ' 路有结果 · ' + lastRun.stats.fail + ' 路失败';
@@ -938,7 +938,7 @@ def state():
         else:
             s = "·"
         quota_rows.append({"svc": svc, "used": v.get("monthly", 0),
-                           "limit": {"firecrawl": 1000, "exa": 2500, "brightdata": 5000}.get(svc, 0),
+                           "limit": {"firecrawl": 1000, "exa": 2500, "brightdata": 5000, "serper": 2500}.get(svc, 0),
                            "official": s})
     stamp = next((v.get("probed_at") for v in official.values() if v.get("probed_at")), None)
     return {"channels": chans, "quota": quota_rows, "official_at": stamp, "lan": LAN}
