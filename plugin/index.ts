@@ -62,13 +62,13 @@ const SCENES: { re: RegExp; on: string; why: string }[] = [
     // 「宜兴 窑湖小镇 万圣节 活动 门票 2026」也含 2026，本地生活必须排在时效前面，
     // 否则「汉庭 窑湖小镇 携程 价格 距离」会被「价格」抢去走时效通道
     re: /(攻略|门票|开放时间|景点|酒店|民宿|住宿|自驾|美食|餐厅|咖啡|附近|地址|门店|营业|入住|景点|演出|展览|活动|烟花|周末去哪)/,
-    on: "qianfan,tf",
-    why: "本地生活/旅行：千帆 + TinyFish（deep 档再加 BrightData 补 Google 本地结果）",
+    on: "serper,fcs,qianfan",
+    why: "本地生活/旅行：Serper Google + Firecrawl + 千帆",
   },
   {
     re: /(\bvs\.?\b|对比|区别|哪个好|哪个更|替代|选型|值得买|值不值|还是)/i,
-    on: "tf,exa,qianfan",
-    why: "对比/选型：TinyFish + Exa 语义 + 千帆",
+    on: "fcs,exa,tf",
+    why: "对比/选型：Firecrawl + Exa 语义 + TinyFish",
   },
   {
     re: /(最新|今天|昨天|本周|明天|后天|发布|上线|价格|股价|行情|天气|气温|降雨|预报|weather|forecast|release|changelog|政策|固件|版本更新|202[5-9])/i,
@@ -77,8 +77,14 @@ const SCENES: { re: RegExp; on: string; why: string }[] = [
   },
   {
     re: /(\bapi\b|\bsdk\b|文档|参数|接口|用法|怎么用|how to use|reference|man ?page|\buri\b|callnative|示例代码|官方文档)/i,
-    on: "fcdev,qianfan,tf",
-    why: "官方文档/API：Firecrawl Dev 索引 + 千帆 + TinyFish",
+    on: "fcdev,fcs,qianfan",
+    why: "官方文档/API：Firecrawl Dev 索引 + Firecrawl 搜索 + 千帆",
+  },
+  {
+    // 「什么是 X / X 是谁 / X 的历史」—— 维基百科 0.7s、免费无限量，比任何搜索通道都快
+    re: /(什么是|是什么|是谁|的定义|定义是什么|原理是什么|历史沿革|由来|起源于|维基百科|百科)/,
+    on: "wiki,qianfan",
+    why: "概念/百科：Wikipedia + 千帆",
   },
   {
     re: /(error|exception|traceback|stack ?trace|报错|排查|卡住|报错|不生效|失败|编译|部署|配置|安装|依赖|端口冲突|超时|崩溃)/i,
@@ -118,8 +124,8 @@ function pickByIntent(query: string): { on: string; why: string; unclear?: boole
       why: "英文技术/硬件：StackExchange + Firecrawl Dev + HN",
     };
   return {
-    on: "tf,fcdev,qianfan",
-    why: "未命中已知场景，先用 TinyFish + 千帆兜底",
+    on: "tf,fcs,qianfan",
+    why: "未命中已知场景，先用 TinyFish + Firecrawl + 千帆兜底",
     unclear: true,
   };
 }
@@ -1577,7 +1583,7 @@ const searchTool = defineTool({
     "学术（论文/arxiv/survey）→ oalex,crossref,fcres；" +
     "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
     "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）。" +
-    "quick 固定 3 路；base 9 路；deep 13 路含限额通道。返回精简摘要，完整来源写到 details.file。",
+    "quick 固定 3 路；base 12 路；deep 16 路含限额通道。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
     profile: Type.Optional(
@@ -1590,7 +1596,7 @@ const searchTool = defineTool({
         ],
         {
           description:
-            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=9 路；deep=13 路",
+            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=12 路；deep=16 路",
         },
       ),
     ),
@@ -1631,7 +1637,7 @@ const searchTool = defineTool({
         "想自己指定就传 channels：qianfan 中文综述(非来源) / tf 全网 / " +
         "fcdev 官方文档 / se 报错 / hn 技术观点 / jj,segfault 中文技术(仅技术) / " +
         "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
-        "fcres 论文全文 / bd Google(最贵最慢)";
+        "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / bd Google(最贵最慢)";
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
         (why ? ` · ${why}` : on ? ` · ${on}` : "") +

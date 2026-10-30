@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-  KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd"
+  KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki"
   _bad=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
@@ -129,6 +129,16 @@ gate() {
     return 0   # TinyFish search $0.00/次 → 不走 quota 记账
   elif [ "$svc" = "brightdata" ]; then
     BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "serper" ]; then
+    # Serper = Google 结果，2,500 次一次性赠送（不是每月重置），之后 $1/1000
+    # 实测 1.85s 回 5 条，比 BrightData 快 5 倍、便宜得多 → 本地生活/电商首选
+    SP_KEY=$(sh "$DIR/load_key.sh" SERPER_API_KEY https://serper.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "firecrawl_search" ]; then
+    # Firecrawl /search 走同一个 key，消耗 firecrawl credits（1 credit/次左右）
+    FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+    svc="firecrawl"
+  elif [ "$svc" = "wiki" ]; then
+    return 0   # Wikipedia REST API 完全免费无限量，不验 key 不记账
   fi
   python3 "$QUOTA" check "$svc" >/dev/null 2>&1; _qrc=$?
   # 0=正常，2=已过裕度线（仍可跑）；1=越免费线 → 跳过
@@ -254,6 +264,51 @@ f_fcres() {
     --data-urlencode "query=$Q" --data-urlencode "k=5" \
     -o "$TMP/fcres.json" -w '%{http_code}' > "$TMP/fcres.http" 2>/dev/null
 }
+f_serper() {
+  gate serper || return 0
+  curl -s --max-time 20 -X POST "https://google.serper.dev/search" \
+    -H "X-API-KEY: $SP_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys,re;q=sys.argv[1];print(json.dumps({"q":q,"num":10,"gl":"cn" if re.search(r"[\u4e00-\u9fff]",q) else "us","hl":"zh-cn" if re.search(r"[\u4e00-\u9fff]",q) else "en"}))' "$Q")" \
+    -o "$TMP/serper.json" -w '%{http_code}' > "$TMP/serper.http" 2>/dev/null
+  [ "$(cat "$TMP/serper.http" 2>/dev/null)" = "200" ] && charge serper
+}
+f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
+  gate firecrawl_search || return 0
+  curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
+    -H "Authorization: Bearer $FC_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":8}))' "$Q")" \
+    -o "$TMP/fcs.json" -w '%{http_code}' > "$TMP/fcs.http" 2>/dev/null
+  [ "$(cat "$TMP/fcs.http" 2>/dev/null)" = "200" ] && charge firecrawl
+}
+f_wiki() {   # Wikipedia REST summary：概念/人物/术语/地名，0.7s、完全免费、无限量
+  gate wiki || return 0
+  # 「紫砂壶是什么」这种疑问句直接搜 opensearch 会返回空数组（没有条目叫这个名字），
+  # 要先剥掉疑问词再搜，否则回退成整个 query 去取 summary 必然 404
+  STRIP='import re,sys
+q=sys.argv[1]
+q=re.sub(r"(是什么|是谁|什么是|的定义是什么|的定义|的原理是什么|的原理|的历史|的由来|怎么用|如何使用|有什么用|介绍一下|是什么意思)[？?。，,]*$","",q.strip())
+q=re.sub(r"^(什么是|介绍一下|讲讲)", "", q)
+print(q.strip() or sys.argv[1])'
+  BASEQ=$(python3 -c "$STRIP" "$Q" 2>/dev/null || echo "$Q")
+  os_search() {
+    curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" -G \
+      "https://zh.wikipedia.org/w/api.php" \
+      --data-urlencode "action=opensearch" --data-urlencode "search=$1" \
+      --data-urlencode "limit=1" --data-urlencode "format=json" \
+      | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); print(d[1][0] if d[1] else "")
+except Exception: print("")' 2>/dev/null
+  }
+  TITLE=$(os_search "$Q")
+  [ -z "$TITLE" ] && TITLE=$(os_search "$BASEQ")
+  [ -z "$TITLE" ] && TITLE="$BASEQ"
+  # REST summary 端点自己会跟随繁简重定向（/w/api.php?redirects=1 对中文维基的繁简重定向不生效，
+  # 「紫砂壶」会拿到「簡繁重定向」那段说明文字而不是正文）
+  ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].replace(" ","_")))' "$TITLE" 2>/dev/null)
+  curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" "https://zh.wikipedia.org/api/rest_v1/page/summary/$ENC" \
+    -o "$TMP/wiki.json" -w '%{http_code}' > "$TMP/wiki.http" 2>/dev/null
+}
 f_bd() {
   gate brightdata || return 0
   # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
@@ -283,7 +338,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf f_serper f_fcs f_wiki; do launch "$fn"; done
 if [ "$DEEP" = 1 ]; then
   for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
@@ -569,6 +624,45 @@ def r_exa():
                     trunc(x.get("snippet") or x.get("text") or "", 100))
                    for x in d.get("results") or []])
 
+def r_serper():
+    d = load_json("serper.json")
+    if d is None:
+        return None
+    if d.get("message") or d.get("error"):
+        return ("ERR", trunc(str(d.get("message") or d.get("error")), 200))
+    rows = list(d.get("organic") or [])
+    # knowledgeGraph（实体卡：门店/品牌/景点）常常是本地生活最准的那条，排在最前
+    kg = d.get("knowledgeGraph") or {}
+    if kg.get("title") and kg.get("descriptionLink"):
+        rows.insert(0, {"title": kg.get("title"), "link": kg.get("descriptionLink"),
+                        "snippet": kg.get("description", "")})
+    return rowify([(x.get("title", ""), x.get("link", ""),
+                    trunc(x.get("snippet") or "", 100)) for x in rows])
+
+def r_fcs():
+    d = load_json("fcs.json")
+    if d is None:
+        return None
+    if d.get("success") is False:
+        return ("ERR", trunc(str(d.get("error") or "firecrawl search failed"), 200))
+    return rowify([(x.get("title") or "", x.get("url") or "",
+                    trunc(x.get("description") or x.get("markdown") or "", 100))
+                   for x in (d.get("data") or [])])
+
+def r_wiki():
+    d = load_json("wiki.json")
+    if d is None:
+        return None
+    if d.get("type") == "disambiguation" or d.get("title") is None:
+        return ("ERR", "维基百科没有这个条目（或只有消歧义页）")
+    title = d.get("title") or ""
+    ex = (d.get("extract") or "").strip()
+    if not title or not ex:
+        return ("ERR", "维基百科条目没有正文")
+    url = ((d.get("content_urls") or {}).get("desktop") or {}).get("page") \
+        or "https://zh.wikipedia.org/wiki/" + title.replace(" ", "_")
+    return rowify([(title, url, trunc(ex, 100))])
+
 def r_fcres():
     d = load_json("fcres.json")
     if d is None:
@@ -608,13 +702,16 @@ SECTIONS = [
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
     ("tf",      "TinyFish Search（官方 hosted MCP，$0/次）", "需 TINYFISH_API_KEY", r_tf, False),
+    ("serper",  "Serper Google（本地生活/电商最强）", "2,500 次一次性赠送，已 quota.py use", r_serper, False),
+    ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
+    ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
     ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):

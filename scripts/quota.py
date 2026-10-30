@@ -39,6 +39,7 @@ LIMITS = {
     "brightdata":  (5000, None),    # MCP/Unlocker Free Tier: 5,000 requests/月（官方 pricing/mcp-server）
     "exa":         (2500, 50),      # 免费余额 $10/月，约合 2,500 次 Lite search（官方 pricing，每月 1 号重置）
     "firecrawl":   (1000, 200),      # Free plan: 1,000 credits/月，每月重置、不结转（官方 pricing）；论文端点免费不计这里
+    "serper":      (2500, None),    # Serper：2,500 次一次性赠送（**不是每月重置**），之后 $1/1000
     "langsearch":  (None, 50),      # 官方只给“daily token 额度”（00:00 UTC 重置、起始 5 RPS），无明确请求数；50=本技能自设保守线
     "jina_reader": (None, 300),      # 免 key 约 20 RPM（按 IP 限速），有 key 提到约 200 RPM；300/日 = 自设保守线
     # browser_use 已移除：本机没有这个工具（pi 未注册、CLI 不存在），记了也是假账
