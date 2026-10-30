@@ -77,7 +77,7 @@ DRAWER_JS = r"""
     "opacity:0;pointer-events:none;transition:opacity .24s}",
     "#dreach-mask.on{opacity:1;pointer-events:auto}",
     "#dreach-panel{position:fixed;top:0;right:0;bottom:0;z-index:2147483000;",
-    "width:min(460px,92vw);background:#f2f2f5;display:flex;flex-direction:column;",
+    "width:min(520px,94vw);background:#f2f2f5;display:flex;flex-direction:column;",
     "transform:translateX(102%);transition:transform .3s cubic-bezier(.3,.9,.3,1);",
     "box-shadow:-8px 0 28px rgba(0,0,0,.16)}",
     "#dreach-panel.on{transform:translateX(0)}",
@@ -231,6 +231,8 @@ PAGE = r"""<!doctype html>
     --bg:#f2f2f5; --card:#ffffff; --card-2:#f8f8fa;
     --fg:#1c1c21; --fg-2:#4b4b53; --muted:#6b6b74; --faint:#9a9aa3;
     --line:rgba(0,0,0,.07); --line-2:#ececf0;
+    /* 连线单独一个色：--line 是 7% 黑，画线太淡看不清；抄 magpie 的 #e3e3e8 */
+    --wire:#e3e3e8;
     --green:#189a58; --red:#c0392b; --amber:#b45309;
     --card-edge:0 0 0 1px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.04);
     --morph-t:.32s; --morph-ease:cubic-bezier(.42,0,.58,1);
@@ -239,6 +241,7 @@ PAGE = r"""<!doctype html>
     :root{ --bg:#1b1c20; --card:#25262c; --card-2:#212227;
       --fg:#ededf1; --fg-2:#b9b9c1; --muted:#9c9ca6; --faint:#7c7c87;
       --line:rgba(255,255,255,.07); --line-2:#2c2c32;
+      --wire:#2e2f36;
       --green:#6fd99b; --red:#f87171; --amber:#f2b544;
       --card-edge:inset 0 0 0 1px rgba(255,255,255,.06); }
   }
@@ -270,7 +273,8 @@ PAGE = r"""<!doctype html>
       row-gap:18px;padding:14px 0 4px}
     .rt-stage .rt-node{padding:10px 6px 8px}
     .rt-stage .rt-node .glyph{font-size:17px;margin-bottom:1px}
-    .rt-accts{grid-column:1 / -1;padding-left:18px;max-height:none}
+    .rt-accts{grid-column:1 / -1;padding-left:20px;margin-left:6px;max-height:none;
+      border-left:1px solid var(--wire)}
     .rt-wires{overflow:visible}
     .rt-accts li{grid-template-columns:10px minmax(0,1fr);row-gap:4px}
     .rt-accts li .right{grid-column:2;text-align:left}
@@ -307,10 +311,12 @@ PAGE = r"""<!doctype html>
   .rt-sky .mag.done{filter:drop-shadow(0 0 5px rgba(24,154,88,.45))}
   .rt-sky .mag.fail circle,.rt-sky .mag.fail path{stroke:var(--red)}
   .rt-sky .mag.fail{filter:drop-shadow(0 0 5px rgba(192,57,43,.45))}
-  .rt-wires path{fill:none;stroke:var(--line);stroke-width:1.5;transition:stroke .3s,opacity .3s}
+  .rt-wires path{fill:none;stroke:var(--wire);stroke-width:1.5;transition:stroke .3s,opacity .3s}
   .rt-wires path.live{stroke:var(--green);stroke-dasharray:3 5;animation:rtflow .7s linear infinite}
-  .rt-wires path.ok{stroke:var(--green);opacity:.55}
+  .rt-wires path.lit{stroke:var(--green);opacity:.55}
   .rt-wires path.fail{stroke:var(--red);stroke-dasharray:2 6;opacity:.6}
+  /* 本轮没分发到的通道：实线淡显 —— 用虚线时十几条挤在一起像毛发 */
+  .rt-wires path.rest{opacity:.5}
   @keyframes rtflow{to{stroke-dashoffset:-8}}
 
   .rt-node{position:relative;z-index:1;min-width:0;display:flex;flex-direction:column;
@@ -326,7 +332,7 @@ PAGE = r"""<!doctype html>
     padding:1px 8px;border-radius:999px;background:var(--fg);color:var(--card)}
 
   .rt-accts{position:relative;z-index:1;list-style:none;margin:0;padding:0;
-    display:grid;gap:7px;min-width:0;max-height:330px;overflow:auto}
+    display:grid;gap:7px;min-width:0;max-height:min(46vh,360px);overflow:auto}
   .rt-accts li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;
     column-gap:10px;row-gap:6px;padding:9px 12px;background:var(--card);
     border:1px solid var(--line);border-radius:10px;font-size:13px;
@@ -587,24 +593,31 @@ function drawWires(){
   svg.setAttribute('viewBox', '0 0 ' + box.width + ' ' + box.height);
   const hb = hub.getBoundingClientRect();
   const x1 = hb.right - box.left + 4, y1 = hb.top + hb.height/2 - box.top;
-  const narrow = box.width <= 560;
   const all = [...document.querySelectorAll('#accts li')];
-  // 窄屏（抽屉里）只画本轮真正分发到的行，否则十几条线挤在一起反而看不清
-  const rows = narrow ? all.filter(li => li.classList.contains('hit') || li.classList.contains('fail'))
-                      : all.slice(0, 10);
-  const paths = rows.map((li, i) => {
+  const accts = document.getElementById('accts');
+  // 行滚出列表可视区时 rect 会跑到容器外，画出来就是飘在空中的线
+  const lb = accts ? accts.getBoundingClientRect() : box;
+  // 全部行都画：命中给 lit，失败给 fail，本轮没分发的给 rest（虚线淡显）——
+  // 只画命中行会让「有几条通道」看不出来，也是 magpie 的做法
+  const paths = all.map((li) => {
     const rb = li.getBoundingClientRect();
+    if (rb.bottom < lb.top + 1 || rb.top > lb.bottom - 1) return null;
     const x2 = rb.left - box.left - 4, y2 = rb.top + rb.height/2 - box.top;
     // 几何保护：hub 与该行没有横向间距时（窄容器塌成单列），连线会退化成竖线，
     // 看着像布局坏了 —— 直接不画这条
     if (x2 - x1 < 28) return null;
     const cx = (x1 + x2) / 2;
-    const cls = li.classList.contains('ok') ? 'ok' : li.classList.contains('fail') ? 'fail' : '';
-    const live = lastRun && i === 0 ? ' live' : '';
-    return '<path data-row="' + all.indexOf(li) + '" class="' + cls + live + '" d="M' + x1 + ',' + y1 +
+    const hit = li.classList.contains('hit') || li.classList.contains('ok');
+    const cls = hit ? 'lit' : li.classList.contains('fail') ? 'fail' : 'rest';
+    return '<path data-row="' + all.indexOf(li) + '" class="' + cls + '" d="M' + x1 + ',' + y1 +
            ' C' + cx + ',' + y1 + ' ' + cx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
   }).filter(Boolean);
   svg.innerHTML = paths.join('');
+  // 列表是滚动容器，滚完线要跟着重画，否则线指在错位置
+  if (accts && !accts.dataset.wireScroll) {
+    accts.dataset.wireScroll = '1';
+    accts.addEventListener('scroll', () => requestAnimationFrame(drawWires), { passive: true });
+  }
 }
 
 async function loadState(){
