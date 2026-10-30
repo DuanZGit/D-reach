@@ -407,6 +407,8 @@ PAGE = r"""<!doctype html>
     align-items:center;column-gap:8px;padding:6px 4px;border-radius:7px;
     font-size:12.5px;cursor:pointer;transition:background var(--morph-t)}
   .hist li:hover{background:var(--card-2)}
+  .hist li.on{background:var(--card-2);box-shadow:inset 2px 0 0 var(--acc)}
+  .hist li .q{cursor:pointer;text-decoration:underline dotted var(--faint);text-underline-offset:3px}
   .hist li .t{color:var(--faint);font-size:11.5px;font-variant-numeric:tabular-nums}
   .hist li .q{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hist li .who{color:var(--muted);font-size:11px;background:var(--card-2);
@@ -673,12 +675,43 @@ async function loadHistory(){
         '<span class="r">' + (it.ok || 0) + '/' + tot + '</span>' +
         '<span class="s">' + (it.secs || 0) + 's</span></li>';
     }).join('');
-    // 点一条回填搜索框，免得手敲
-    list.onclick = function (e) {
+    // 点一条 → 显示那一轮的完整详情（各通道返回了什么）。回填输入框改为点查询文字本身。
+    list.onclick = async function (e) {
       const li = e.target.closest('li[data-i]');
       if (!li) return;
       const it = items[Number(li.dataset.i)];
-      if (it && it.query) { $('#q').value = it.query; $('#q').focus(); }
+      if (!it) return;
+      // 点中的是查询文字 → 回填；点中其他区域 → 看详情
+      if (e.target.closest('.q')) {
+        $('#q').value = it.query || '';
+        $('#q').focus();
+        return;
+      }
+      if (!it.round) return;
+      list.querySelectorAll('li.on').forEach(x => x.classList.remove('on'));
+      li.classList.add('on');
+      $('#what').innerHTML = '<b>' + esc(it.query || '') + '</b> · 历史回放 · ' +
+        esc((it.ts || '').replace('T', ' ').slice(5, 16));
+      $('#node-pill').textContent = '回放';
+      try {
+        const r = await fetch(api('/api/round?ts=' + encodeURIComponent(it.round)));
+        if (!r.ok) throw new Error('取不到这一轮的存档');
+        const d = await r.json();
+        lastRun = Object.assign({ q: it.query, deep: it.deep }, parseRun(d.md));
+        $('#s-req').textContent = it.ok || 0;
+        $('#s-fail').textContent = it.fail || 0;
+        $('#s-skip').textContent = it.skip || 0;
+        $('#foot-note').textContent = '历史回放：' + (it.ts || '').replace('T', ' ').slice(0, 16) +
+          ' · ' + (it.source || 'cli') + ' · ' + (it.secs || 0) + 's';
+        $('#src').innerHTML = renderSources(d.md);
+        $('#srccnt').textContent = (it.ok || 0) + ' 路有结果 · ' + (it.fail || 0) + ' 路失败';
+        $('#srcbox').hidden = false;
+        $('#srcbox').open = true;
+        render();
+        requestAnimationFrame(function () { flyAll(); });
+      } catch (err) {
+        $('#foot-note').textContent = '回放失败：' + err.message;
+      }
     };
     // 左侧节点显示最近一次：查了什么、谁发起的（magpie 那边是 agent + group）
     const last = items[0];
@@ -895,6 +928,10 @@ def history(limit=30):
                 continue
     except Exception:
         return {"items": []}
+    for it in out:
+        # 与 fanout.sh 存 rounds/<stamp>.md 的转换保持一致：2026-10-31T00:18:40+08:00 → 20261031-001840
+        it["round"] = (it.get("ts") or "").replace("-", "").replace(":", "") \
+            .replace("T", "-").split("+")[0]
     return {"items": list(reversed(out))}
 
 
@@ -1010,6 +1047,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, ICON, "image/svg+xml; charset=utf-8")
         elif path == "/api/state":
             self._send(200, json.dumps(state(), ensure_ascii=False), "application/json")
+        elif path == "/api/round":
+            qs = parse_qs(urlparse(self.path).query)
+            ts = (qs.get("ts") or [""])[0]
+            if not re.fullmatch(r"[0-9T\-]{15}", ts or ""):
+                return self._send(400, '{"error":"bad ts"}', "application/json")
+            p = DATA / "rounds" / f"{ts}.md"
+            if not p.exists():
+                return self._send(404, '{"error":"not found"}', "application/json")
+            self._send(200, json.dumps({"md": p.read_text(encoding="utf-8")},
+                                       ensure_ascii=False), "application/json")
         elif path == "/api/history":
             self._send(200, json.dumps(history(), ensure_ascii=False), "application/json")
         else:
