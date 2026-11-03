@@ -182,8 +182,11 @@ const ROUTE_PROMPT =
   "- 读链接/抓网页 → fcs\n" +
   "- 学术论文 → fcres + oalex\n" +
   "- 英文技术 → hn + fcdev\n\n" +
-  "只输出通道名，用英文逗号分隔，不要解释，不要编号。\n" +
-  "例如：serper,qianfan\n\n" +
+  "只输出两行，格式严格如下（不要解释、不要编号、不要加任何其他内容）：\n" +
+  "通道：serper,qianfan\n" +
+  "英文：best web search api 2026\n\n" +
+  "第二行是把用户问题翻成英文检索关键词：3-6 个词，保留专有名词，去掉「研究下」「看看」「有什么」这类口语。\n" +
+  "英文通道（hn/se/gh/oalex/fcdev/exa/fcs/fcres）只用英文检索，中文 query 打过去恒 0 命中，所以这行必须有。\n\n" +
   "可选通道：\n" +
   CHANNEL_MENU.map(([k, v]) => `- ${k} ${v}`).join("\n");
 
@@ -195,11 +198,29 @@ const ROUTE_PROMPT =
  * 回了 13 个），这里统一截到 4 个。
  */
 function parseChannels(text: string): string[] {
+  // 优先只看「通道：」那一行 —— 第二行的英文检索词里可能含 se / gh 这类短词，
+  // 全文切词会误判成通道。模型没按格式输出时才退回全文切词。
+  const line = text.match(/通道\s*[:：]\s*(.+)/)?.[1] ?? text;
   const out: string[] = [];
-  for (const tk of text.toLowerCase().split(/[^a-z0-9]+/)) {
+  for (const tk of line.toLowerCase().split(/[^a-z0-9]+/)) {
     if (VALID_CHANNELS.includes(tk) && !out.includes(tk)) out.push(tk);
   }
   return out.slice(0, 4);
+}
+
+/**
+ * 从模型输出第二行「英文：xxx」抠出英文检索词。
+ *
+ * HN / StackExchange / GitHub / OpenAlex / Firecrawl 这些通道只认英文，中文 query
+ * 打过去恒 0 命中（HN 直接 0 条，SE 长中文会被静默丢弃返回全站最高票）。
+ * 抠不到就返回空串，fanout.sh 会退回原 query（行为与改动前一致）。
+ */
+function parseEnglish(text: string): string {
+  const m = text.match(/英文\s*[:：]\s*(.+)/);
+  if (!m) return "";
+  const q = m[1].trim().replace(/^["'“”‘’]+|[\s"'“”‘’]+$/g, "");
+  // 必须含成对英文字母，否则中文残留照样让英文通道 0 命中
+  return /[a-zA-Z]{2}/.test(q) ? q.slice(0, 120) : "";
 }
 
 /**
@@ -218,7 +239,7 @@ function parseChannels(text: string): string[] {
 async function pickByIntentLLM(
   query: string,
   ctx: unknown,
-): Promise<{ on: string; why: string; unclear?: boolean } | null> {
+): Promise<{ on: string; why: string; unclear?: boolean; en?: string } | null> {
   const reg = (ctx as { modelRegistry?: any })?.modelRegistry;
   const dbg = async (m: string) => {
     try {
@@ -257,7 +278,7 @@ async function pickByIntentLLM(
             role: "user",
             // 全部指令放 user：pi 的 complete 会叠加自己的默认 system 提示，
             // system 里的约束实测被冲淡过两次（先回正文、后回 "search"）。
-            content: `${ROUTE_PROMPT}\n\n搜索意图：${query}\n\n只输出通道名（英文逗号分隔），不要回答这个问题。`,
+            content: `${ROUTE_PROMPT}\n\n搜索意图：${query}\n\n只输出那两行，不要回答这个问题。`,
           },
         ],
       },
@@ -275,12 +296,15 @@ async function pickByIntentLLM(
   }
 
   const picked = parseChannels(raw);
+  const en = parseEnglish(raw);
   if (!picked.length) {
     await dbg(`选路未命中，退回正则：${JSON.stringify(raw.slice(0, 100))}`);
     return null;
   }
-  await dbg(`模型选路 ${model.provider}/${model.id} → ${picked.join(",")}`);
-  return { on: picked.join(","), why: `模型选路：${picked.join(" + ")}` };
+  await dbg(
+    `模型选路 ${model.provider}/${model.id} → ${picked.join(",")} | 英文：${en || "(无)"}`,
+  );
+  return { on: picked.join(","), why: `模型选路：${picked.join(" + ")}`, en };
 }
 
 function pickByIntent(query: string): { on: string; why: string; unclear?: boolean } {
@@ -504,14 +528,19 @@ async function runFanout(
   let why = "";
   let unclear = false;
   let on = channels || PROFILES[profile].on;
+  let en = "";
   if (!on && profile === "auto") {
     // 先让分类器模型判（语义判得准，用户要求效果优先），拿不到结果再退回关键词正则
     const picked = (await pickByIntentLLM(query, ctx)) ?? pickByIntent(query);
     on = picked.on;
     why = picked.why;
+    en = (picked as { en?: string }).en ?? "";
     unclear = picked.unclear === true;
   }
   if (on) args.push("--on", on);
+  // 英文检索词：中文 query 打英文通道恒 0 命中（HN 0 条、SE 长中文被静默丢弃），
+  // 用模型译好的英文版；没拿到就退回原 query，行为与改动前一致。
+  if (en) args.push("--en", en);
 
   const t0 = Date.now();
   const env: NodeJS.ProcessEnv = { ...process.env };

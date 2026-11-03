@@ -41,12 +41,13 @@ done
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
 
 # ---------- 参数 ----------
-Q=""; DEEP=0; N=5; ON=""; FORCE=0
+Q=""; ENQ=""; DEEP=0; N=5; ON=""; FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1 ;;
     --n) shift; N="${1:-5}" ;;
     --on) shift; ON="${1:-}" ;;
+    --en) shift; ENQ="${1:-}" ;;   # 英文检索词：LLM 把中文 query 译好后传进来，英文通道用它
     --force) FORCE=1 ;;   # 忽略健康状态，强制跑（调试/复检用）
     --list) python3 - "$0" <<'PY'
 import re, sys
@@ -68,7 +69,8 @@ PY
   esac
   shift
 done
-if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans]"; exit 2; fi
+ENQ="${ENQ:-$Q}"   # 没给 --en 时英文通道退回原 query，行为与改动前一致
+if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans] [--en \"<english>\"]"; exit 2; fi
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
@@ -170,7 +172,7 @@ want() { [ -z "$ON" ] && return 0; case ",$ON," in *",$1,"*) return 0;; esac; re
 f_gh() {     # GitHub 仓库搜索（免 key，10 次/分钟）
   # GitHub 只认英文且整句是 AND 匹配：「Home Assistant 3D floorplan dashboard card github」
   # 整句传过去 total_count=0。所以抽 ASCII 词、剔掉 github/the/for 这类噪声、取前 4 个。
-  GQ=$(echo "$Q" | grep -oE '[A-Za-z0-9][A-Za-z0-9._+-]*' \
+  GQ=$(echo "$ENQ" | grep -oE '[A-Za-z0-9][A-Za-z0-9._+-]*' \
        | grep -viE '^(github|repo|repository|the|a|an|of|for|and|to|in|on|with|how|what|best|ui|ux|api|app|web|ai|ml|ios|os)$' \
        | head -4 | tr '\n' ' ')
   # 抽不出英文词不是失败（中文 query 很正常）——写 skip 而不是空结果，
@@ -235,7 +237,7 @@ f_bili() {   # B 站视频搜索（需登录态；冷却 90 秒）
 f_se() {     # StackExchange 排障
   # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
   # shellcheck disable=SC2086
-  set -- $Q
+  set -- $ENQ
   SEQ="${1:-} ${2:-} ${3:-} ${4:-} ${5:-}"
   curl -s --compressed --max-time 15 -G "https://api.stackexchange.com/2.3/search/advanced" \
     --data-urlencode "order=desc" --data-urlencode "sort=relevance" \
@@ -244,7 +246,7 @@ f_se() {     # StackExchange 排障
 }
 f_hn() {     # HN 深技术讨论
   curl -s --max-time 12 -G "https://hn.algolia.com/api/v1/search" \
-    --data-urlencode "query=$Q" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" -w '%{http_code}' > "$TMP/hn.http" 2>/dev/null
+    --data-urlencode "query=$ENQ" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" -w '%{http_code}' > "$TMP/hn.http" 2>/dev/null
 }
 f_jj() {     # 掘金 中文技术长尾
   curl -s --max-time 12 -H 'Content-Type: application/json' -X POST \
@@ -254,7 +256,7 @@ f_jj() {     # 掘金 中文技术长尾
 }
 f_oalex() {  # OpenAlex 学术
   curl -s --max-time 12 -G "https://api.openalex.org/works" \
-    --data-urlencode "search=$Q" --data-urlencode "per-page=5" \
+    --data-urlencode "search=$ENQ" --data-urlencode "per-page=5" \
     --data-urlencode 'mailto=d-reach@local' -o "$TMP/oalex.json" -w '%{http_code}' > "$TMP/oalex.http" 2>/dev/null
 }
 f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时跳过）
@@ -278,11 +280,11 @@ f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源）
   _fck=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || _fck=""
   if [ -n "$_fck" ]; then
     curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" -H "Authorization: Bearer $_fck" \
-      --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
+      --data-urlencode "query=$ENQ" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
     [ "$(cat "$TMP/fcdev.http" 2>/dev/null)" = "200" ] && charge firecrawl
   else
     curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" \
-      --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
+      --data-urlencode "query=$ENQ" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
   fi
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
@@ -341,7 +343,7 @@ f_exa() {
   gate exa || return 0
   curl -s --max-time 20 -X POST "https://api.exa.ai/search" \
     -H "x-api-key: $EXA_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"numResults":10}))' "$Q")" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"numResults":10}))' "$ENQ")" \
     -o "$TMP/exa.json" -w '%{http_code}' > "$TMP/exa.http" 2>/dev/null
   [ "$(cat "$TMP/exa.http" 2>/dev/null)" = "200" ] && charge exa
 }
@@ -349,7 +351,7 @@ f_fcres() {
   gate fcres || return 0
   curl -s --max-time 20 -H "Authorization: Bearer $FC_KEY" -G \
     "https://api.firecrawl.dev/v2/search/research/papers" \
-    --data-urlencode "query=$Q" --data-urlencode "k=5" \
+    --data-urlencode "query=$ENQ" --data-urlencode "k=5" \
     -o "$TMP/fcres.json" -w '%{http_code}' > "$TMP/fcres.http" 2>/dev/null
 }
 f_serper() {
@@ -412,7 +414,7 @@ f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量�
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
     -H "Authorization: Bearer $FC_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":8}))' "$Q")" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":8}))' "$ENQ")" \
     -o "$TMP/fcs.json" -w '%{http_code}' > "$TMP/fcs.http" 2>/dev/null
   [ "$(cat "$TMP/fcs.http" 2>/dev/null)" = "200" ] && charge firecrawl
 }
