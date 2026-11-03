@@ -60,8 +60,9 @@ type Profile = keyof typeof PROFILES;
 // 规则来自 40 次历史 d_reach 调用的实际 query 分布 —— 之前「中文通用」走
 // qianfan,jj,segfault，查酒店/门票/天气全落到掘金和 SegmentFault 两个程序员
 // 社区，是最大的误判来源。
-const SCENES: { re: RegExp; on: string; why: string }[] = [
+const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
   {
+    key: "academic",
     re: /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述|doi|citation)/i,
     on: "oalex,crossref,fcres",
     why: "学术：OpenAlex + Crossref + Research Index",
@@ -69,37 +70,98 @@ const SCENES: { re: RegExp; on: string; why: string }[] = [
   {
     // 「宜兴 窑湖小镇 万圣节 活动 门票 2026」也含 2026，本地生活必须排在时效前面，
     // 否则「汉庭 窑湖小镇 携程 价格 距离」会被「价格」抢去走时效通道
+    key: "local",
     re: /(攻略|门票|开放时间|景点|酒店|民宿|住宿|自驾|美食|餐厅|咖啡|附近|地址|门店|营业|入住|景点|演出|展览|活动|烟花|周末去哪)/,
     on: "serper,fcs,qianfan",
     why: "本地生活/旅行：Serper Google + Firecrawl + 千帆",
   },
   {
+    key: "compare",
     re: /(\bvs\.?\b|对比|区别|哪个好|哪个更|替代|选型|值得买|值不值|还是)/i,
     on: "fcs,exa,tf",
     why: "对比/选型：Firecrawl + Exa 语义 + TinyFish",
   },
   {
+    key: "timely",
     re: /(最新|今天|昨天|本周|明天|后天|发布|上线|价格|股价|行情|天气|气温|降雨|预报|weather|forecast|release|changelog|政策|固件|版本更新|202[5-9])/i,
     on: "langsearch,tf,qianfan",
     why: "时效/天气/政策：LangSearch + TinyFish + 千帆",
   },
   {
+    key: "docs",
     re: /(\bapi\b|\bsdk\b|文档|参数|接口|用法|怎么用|how to use|reference|man ?page|\buri\b|callnative|示例代码|官方文档)/i,
     on: "fcdev,fcs,qianfan",
     why: "官方文档/API：Firecrawl Dev 索引 + Firecrawl 搜索 + 千帆",
   },
   {
     // 「什么是 X / X 是谁 / X 的历史」—— 维基百科 0.7s、免费无限量，比任何搜索通道都快
+    key: "concept",
     re: /(什么是|是什么|是谁|的定义|定义是什么|原理是什么|历史沿革|由来|起源于|维基百科|百科)/,
     on: "wiki,qianfan",
     why: "概念/百科：Wikipedia + 千帆",
   },
   {
+    key: "debug",
     re: /(error|exception|traceback|stack ?trace|报错|排查|卡住|报错|不生效|失败|编译|部署|配置|安装|依赖|端口冲突|超时|崩溃)/i,
     on: "se,fcdev,qianfan",
     why: "排障：StackExchange + Firecrawl Dev + 千帆",
   },
 ];
+
+// 判档的候选场景（模型分类与正则共用一套 key，避免两处定义分叉）
+const SCENE_CRITERIA: Record<string, string> = {
+  academic: "学术论文、文献综述、benchmark、DOI、引用、研究综述",
+  local: "本地生活与旅行：景点门票、酒店民宿、攻略、美食餐厅、活动展览",
+  compare: "对比选型：几个方案哪个更好、有什么区别、替代品、值不值",
+  timely: "需要最新信息：价格行情、天气、政策、版本发布、本周或今天发生的事",
+  docs: "官方文档、API/SDK 用法、参数说明、示例代码",
+  concept: "概念定义、某人是谁、历史由来、原理是什么",
+  debug: "报错排查、编译失败、部署配置、依赖冲突、性能问题",
+  tech: "技术实现与工程实践、开源项目、硬件外设（不特指某家文档）",
+  general: "以上都不贴近的通用问题",
+};
+
+/**
+ * 用分类器模型判档，替代关键词正则。
+ *
+ * 正则的死角：「这两个东西哪个好」不含 vs/对比 就漏判成通用；
+ * 模型能按语义判。用户要求「效果优先、不差这点 token」，所以默认走模型。
+ *
+ * 任何一步失败（没有分类器模型 / 没凭证 / 调用报错）都返回 null，
+ * 由调用方退回 pickByIntent 正则 —— 判档慢一点或猜错一点都不能让检索挂掉。
+ */
+async function pickByIntentLLM(
+  query: string,
+  ctx: unknown,
+): Promise<{ on: string; why: string; unclear?: boolean } | null> {
+  try {
+    const reg = (ctx as { modelRegistry?: any })?.modelRegistry;
+    if (!reg?.classify) return null;
+    const models: any[] = reg.getModelsOfType?.("classifier") ?? [];
+    const model = models.find((m) => reg.hasConfiguredAuth?.(m));
+    if (!model) return null;
+
+    const res = await reg.classify(model, {
+      state: { query },
+      questions: {
+        scene: {
+          type: "choice",
+          instructions:
+            "判断这条搜索 query 属于哪一类，选最贴近的一类。判不准就选 general，不要硬猜。",
+          criteria: SCENE_CRITERIA,
+        },
+      },
+    });
+    const ans = res?.answers?.scene;
+    if (!ans || ans.type !== "choice") return null;
+    const hit = SCENES.find((s) => s.key === String(ans.choice));
+    if (!hit) return null; // tech / general 交给正则的兜底分支（它还有技术词表）
+    const pct = Math.round((ans.confidence ?? 0) * 100);
+    return { on: hit.on, why: `${hit.why}（模型判档 ${pct}%）` };
+  } catch {
+    return null;
+  }
+}
 
 function pickByIntent(query: string): { on: string; why: string; unclear?: boolean } {
   const zh = /[\u4e00-\u9fff]/.test(query);
@@ -154,6 +216,8 @@ interface ChannelResult {
 
 interface Parsed {
   channels: ChannelResult[];
+  /** 跨源共识段（同一 URL 被多个源同时排到前面）的原始条目 */
+  consensus: string[];
   summary: string;
   next: string;
   health: string;
@@ -171,12 +235,29 @@ const MARK_STATUS: Record<string, ChannelResult["status"]> = {
 function parseFanout(md: string): Parsed {
   const channels: ChannelResult[] = [];
   let cur: ChannelResult | null = null;
+  const consensus: string[] = [];
+  let inConsensus = false;
   let summary = "";
   let next = "";
   let health = "";
 
   for (const raw of md.split("\n")) {
     const line = raw.trimEnd();
+
+    // 跨源合并段不是通道：遇到它就把 cur 置空，否则合并条目会被算进上一个通道的 hits
+    if (line.startsWith("### 🔀")) {
+      cur = null;
+      inConsensus = true;
+      continue;
+    }
+    if (inConsensus) {
+      if (line.startsWith("- ")) {
+        consensus.push(line.slice(2));
+        continue;
+      }
+      if (!line.trim()) continue;   // 段内空行
+      inConsensus = false;          // 别的段落开始了
+    }
 
     const head = line.match(/^###\s+(✅|⚪|❌|⚠️|🔇|💬)\s+(.+)$/);
     if (head) {
@@ -235,7 +316,7 @@ function parseFanout(md: string): Parsed {
       if (plain) cur.hits.push({ title: plain[1], url: "", note: "" });
     }
   }
-  return { channels, summary, next, health };
+  return { channels, consensus, summary, next, health };
 }
 
 function stateOf(ch: ChannelResult): string {
@@ -252,6 +333,11 @@ function renderSearch(
   title: string,
 ): string {
   const lines: string[] = [title];
+  if (parsed.consensus.length) {
+    lines.push("", "跨源共识（同一 URL 被多个源同时排到前面）：");
+    for (const c of parsed.consensus) lines.push(`- ${c}`);
+  }
+  if (parsed.consensus.length) lines.push("");
   for (const ch of parsed.channels) {
     lines.push(`- ${ch.name}：${stateOf(ch)}`);
     if (ch.status !== "ok" && ch.status !== "zero") continue;
@@ -291,6 +377,7 @@ async function runFanout(
   profile: Profile,
   channels: string,
   source = "",
+  ctx?: unknown,
 ): Promise<{ md: string; secs: number; on: string; why: string; unclear?: boolean }> {
   const args = [FANOUT, query];
   if (profile === "deep") args.push("--deep");
@@ -298,7 +385,8 @@ async function runFanout(
   let unclear = false;
   let on = channels || PROFILES[profile].on;
   if (!on && profile === "auto") {
-    const picked = pickByIntent(query);
+    // 先让分类器模型判（语义判得准，用户要求效果优先），拿不到结果再退回关键词正则
+    const picked = (await pickByIntentLLM(query, ctx)) ?? pickByIntent(query);
     on = picked.on;
     why = picked.why;
     unclear = picked.unclear === true;
@@ -1749,6 +1837,7 @@ const searchTool = defineTool({
         profile,
         params.channels ?? "",
         sourceTag(ctx),
+        ctx,
       );
       const parsed = parseFanout(md);
       const file = await persist(md, query);
@@ -1976,7 +2065,13 @@ export default function dReachExtension(pi: ExtensionAPI) {
     if (!query) return ctx.ui.notify("用法：/reach <检索词>", "warning");
     ctx.ui.notify(`d-reach ${profile} 检索中：${query}`, "info");
     try {
-      const { md, secs } = await runFanout(query, profile, "", sourceTag(ctx));
+      const { md, secs } = await runFanout(
+        query,
+        profile,
+        "",
+        sourceTag(ctx),
+        ctx,
+      );
       const parsed = parseFanout(md);
       await persist(md, query);
       ctx.ui.notify(

@@ -99,14 +99,24 @@ trap 'rm -rf "$TMP"' EXIT
 HEALTH="${D_REACH_HEALTH:-$HOME/.agent-reach/channels.json}"
 HEALTH_BAD=$(python3 - "$HEALTH" <<'PY' 2>/dev/null
 import json, sys
+from datetime import datetime, timezone
 bad = []
 try:
     h = json.load(open(sys.argv[1], encoding="utf-8"))
 except Exception:
     h = {}
+now = datetime.now(timezone.utc)
 for k, v in h.items():
-    if isinstance(v, dict) and v.get("streak_fail", 0) >= 3:
-        bad.append(k)
+    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+        continue
+    until = v.get("suspend_until")
+    if not until:
+        continue                      # 没有到期时间 = 该放行一次，让 mark 补上退避
+    try:
+        if datetime.fromisoformat(until) > now:
+            bad.append(k)             # 还在挂起期内
+    except Exception:
+        continue                      # 时间戳坏了也放行，别把通道永久判死
 print(" ".join(bad))
 PY
 )
@@ -391,7 +401,7 @@ export D_REACH_T0
 
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
 import json, os, re, sys, html, pathlib, time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # 收集本轮全部输出，历史详情（网关点一条看全文）要用 —— 覆盖 print 而不是到处插 buf.append
 _REAL_PRINT = print
@@ -835,23 +845,68 @@ def save_health(h):
 health = load_health()
 now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+# 挂起退避阶梯（秒）：第 3 次连败挂 10 分钟，第 4 次 30 分钟，第 5 次起 2 小时封顶。
+# 取小值是为了「坏通道别永久静默」——挂起到期会自动重试一次，通了就清零。
+BACKOFF = [600, 1800, 7200]
+
 ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
 def mark(key, status):
-    """只记「连败几次 + 最后成败时间」。skip 不计失败，避免本轮没请求把通道判死。
+    """只记「连败几次 + 最后成败时间 + 挂起到期时间」。skip 不计失败，避免本轮没请求把通道判死。
 
-    ponytail: 阈值硬编码 3 次（launch 里判断）。取小值是为了「偶发网络抖动别一发就拉黑」；
-    真出现反复误杀再提到环境变量。
+    连败 ≥3 次进挂起，退避 10 分钟 → 30 分钟 → 2 小时封顶（用户要求退避短一些）。
+    到期自动重试一次：成功清零、失败继续升级。这样通道不会「跳过→不跑→永不成功」死锁。
     """
     v = health.setdefault(key, {"streak_fail": 0})
     ROUND.append({"key": key, "status": status})
     if status == "ok":
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
+        v.pop("suspend_until", None)   # 成功即解除挂起
+        v.pop("suspend_secs", None)
     elif status == "fail":
         v["streak_fail"] = v.get("streak_fail", 0) + 1
         v["last_fail"] = now_iso
+        n = v["streak_fail"]
+        if n >= 3:
+            secs = BACKOFF[min(n - 3, len(BACKOFF) - 1)]
+            v["suspend_until"] = (
+                datetime.now(timezone.utc) + timedelta(seconds=secs)
+            ).isoformat(timespec="seconds")
+            v["suspend_secs"] = secs
 
 total, okc, zero = 0, 0, 0
+
+# ---------- 跨源合并：先把每路输出缓冲住，最后统一排序 ----------
+# 同一 URL 在 3 个源都出现就重复 3 遍，读者得自己判可信度。SearXNG 的做法是全局合并：
+# 同 URL 只留一条，按「被几个源同时排到前面」打分（score = 命中源数 × Σ 权重/名次）。
+# 多个独立源都排前面的才是真信号。分节视图保留在合并段之后，不缺信息。
+CHAN_OUT = []       # 各通道的 markdown 块（缓冲区）
+MERGE_ROWS = []     # (key, name, title, url, snippet, rank)
+CH_W = {            # 通道权重：直接给正文的源比只给标题的高
+    "serper": 1.0, "tavily": 1.0, "fcs": 1.0, "fcdev": 1.0, "tf": 1.0,
+    "exa": 1.0, "qianfan": 1.0, "fcres": 1.0,
+    "langsearch": 0.9, "parallel": 0.9,
+    "oalex": 0.8, "crossref": 0.8, "se": 0.8,
+    "hn": 0.7, "bd": 0.7,
+    "jj": 0.6, "wiki": 0.6, "segfault": 0.6,
+}
+DW = 0.7
+
+_orig_print = print
+
+def cprint(*a, **k):
+    """循环内的 print：写进缓冲区，不立即上屏（等合并段算完再统一输出）。"""
+    if k.get("file") not in (None, sys.stdout):
+        _orig_print(*a, **k)          # stderr 等旁路，不缓冲
+        return
+    import io as _io
+    _b = _io.StringIO()
+    k2 = dict(k); k2["file"] = _b
+    _REAL_PRINT(*a, **k2)
+    CHAN_OUT.append(_b.getvalue())
+    _OUT.append(_b.getvalue())        # 历史详情仍要完整
+
+print = cprint
 skipped, failed = [], []
 for key, name, note, fn, deep_only in SECTIONS:
     if ONLY and key not in ONLY:
@@ -860,8 +915,18 @@ for key, name, note, fn, deep_only in SECTIONS:
         continue
     skip = read_skip(key)
     if skip == "health":
-        bad = (health.get(key) or {}).get("streak_fail", 0)
-        print(f"### 🔇 {name} —— 连续失败 {bad} 次，已按健康状态跳过（`--force` 可强跑）\n")
+        v = health.get(key) or {}
+        bad = v.get("streak_fail", 0)
+        until = v.get("suspend_until")
+        left = ""
+        if until:
+            try:
+                delta = (datetime.fromisoformat(until) - datetime.now(timezone.utc)).total_seconds()
+                if delta > 0:
+                    left = f"，{int(delta // 60) + 1} 分钟后自动重试"
+            except Exception:
+                pass
+        print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
         skipped.append(name); mark(key, "skip")
         continue
     if skip == "key":
@@ -910,9 +975,59 @@ for key, name, note, fn, deep_only in SECTIONS:
         okc += 1; mark(key, "ok")
         total += len(rows)
         print(f"### ✅ {name}\n_{note}_\n")
-        for t, u, x in rows:
+        for rank, (t, u, x) in enumerate(rows):
             print(f"- [{t}]({u})" + (f" — {x}" if x else ""))
+            MERGE_ROWS.append((key, name, t, u, x, rank))
         print()
+
+# ---------- 恢复直输出：先出合并段，再放分节 ----------
+print = _orig_print
+
+def norm_url(u):
+    """URL 归一化：去 fragment / utm 类参数 / www 前缀 / 尾斜杠，用于跨源判重。"""
+    try:
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        s = urlsplit(str(u).strip())
+        host = (s.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        q = [(k, v) for k, v in parse_qsl(s.query)
+             if not k.lower().startswith(("utm_", "ref", "fbclid", "gclid", "spm"))
+             and k.lower() not in ("rankingid", "ranking_id")]
+        path = s.path.rstrip("/") or "/"
+        return urlunsplit(((s.scheme or "https").lower(), host, path, urlencode(q), ""))
+    except Exception:
+        return str(u).strip().lower()
+
+agg = {}
+for key, name, t, u, x, rank in MERGE_ROWS:
+    nu = norm_url(u)
+    d = agg.get(nu)
+    if d is None:
+        # url 存归一化后的：判重靠它，展示也靠它（原 URL 常带 utm/rankingId 这类跟踪参数）
+        d = agg[nu] = {"title": t, "url": nu, "snippet": x or "", "hits": []}
+    d["hits"].append((key, rank))
+    if not d["snippet"] and x:
+        d["snippet"] = x
+
+for d in agg.values():
+    n = len(d["hits"])
+    d["score"] = n * sum(CH_W.get(k, DW) / (r + 1) for k, r in d["hits"])
+
+multi = sorted((d for d in agg.values() if len(d["hits"]) >= 2),
+               key=lambda d: -d["score"])
+
+if len(multi) >= 3:      # 少于 3 条说明各路本来就各说各话，合并段没信息量
+    print(f"### 🔀 跨源共识（{len(multi)} 条被 ≥2 个源同时排到前面）\n")
+    for d in multi[:10]:
+        srcs = " · ".join(f"{k}#{r + 1}" for k, r in sorted(d["hits"], key=lambda h: h[1]))
+        print(f"- **[{d['title']}]({d['url']})** — {len(d['hits'])} 源（{srcs}）"
+              + (f" — {d['snippet']}" if d["snippet"] else ""))
+    print()
+
+# 分节视图（保留「哪路出的」这个维度，合并段看不到的细节靠它）
+for _blk in CHAN_OUT:
+    _REAL_PRINT(_blk, end="")
 
 save_health(health)
 weak = [f"{k}({v.get('streak_fail', 0)} 连败)" for k, v in health.items()
