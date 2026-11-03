@@ -49,8 +49,8 @@ const UA =
 const PROFILES = {
   auto: { label: "auto · 按场景选路", on: "" },
   quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
-  base: { label: "base · 9 路", on: "" },
-  deep: { label: "deep · 13 路", on: "" },
+  base: { label: "base · 14 路", on: "" },
+  deep: { label: "deep · 18 路", on: "" },
 } as const;
 
 type Profile = keyof typeof PROFILES;
@@ -1665,7 +1665,7 @@ const searchTool = defineTool({
     "学术（论文/arxiv/survey）→ oalex,crossref,fcres；" +
     "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
     "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）。" +
-    "quick 固定 3 路；base 12 路；deep 16 路含限额通道。返回精简摘要，完整来源写到 details.file。",
+    "quick 固定 3 路；base 14 路；deep 18 路含限额通道。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
     profile: Type.Optional(
@@ -1678,7 +1678,7 @@ const searchTool = defineTool({
         ],
         {
           description:
-            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=12 路；deep=16 路",
+            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=14 路；deep=18 路",
         },
       ),
     ),
@@ -1955,7 +1955,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
     handler: (args, ctx) => runCommand(args, ctx, "auto"),
   });
   pi.registerCommand("reach-deep", {
-    description: "d-reach 检索（deep 13 路含限额通道）",
+    description: "d-reach 检索（deep 18 路含限额通道）",
     handler: (args, ctx) => runCommand(args, ctx, "deep"),
   });
 }
