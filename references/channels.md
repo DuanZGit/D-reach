@@ -38,7 +38,7 @@
 ### `fcdev` Firecrawl Developer Index · 编程一手源
 - **擅长**：**官方文档、API 参数、GitHub README、issue**。7000 万+ 编程文档索引，查「某个 API 怎么调」「某个库的参数」最准。
 - **不擅长**：非技术话题完全无用；中文文档覆盖少。
-- **代价**：免费。
+- **代价**：有 Firecrawl key 就消耗 credits（1 次/查询）；没 key 落 keyless 免费档，但那是 **IP 级额度**，耗尽后 429 要等十几小时（实测 `retry_after_seconds: 40699`）——所以有 key 时优先走 key。
 - **别用它做**：问旅行、问产品评测、问新闻。
 
 ### `se` StackExchange · 报错排障

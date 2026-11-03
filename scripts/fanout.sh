@@ -269,9 +269,18 @@ f_segfault() { # SegmentFault 中文技术长尾（-L 跟跳转；博客园已�
   curl -sL --compressed --max-time 20 -A "$UA" -G "https://segmentfault.com/search" \
     --data-urlencode "q=$Q" -o "$TMP/segfault.html" -w '%{http_code}' > "$TMP/segfault.http" 2>/dev/null
 }
-f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
-  curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" \
-    --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
+f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源）
+  # 有 key 走 key：keyless 是 IP 级免费额度，耗尽后 429 要等十几小时（实测 retry_after 40699s）
+  # 没 key 才落 keyless 免费档，仍能跑但随时可能被限
+  _fck=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || _fck=""
+  if [ -n "$_fck" ]; then
+    curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" -H "Authorization: Bearer $_fck" \
+      --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
+    [ "$(cat "$TMP/fcdev.http" 2>/dev/null)" = "200" ] && charge firecrawl
+  else
+    curl -s --max-time 18 -G "https://api.firecrawl.dev/v2/search/developer" \
+      --data-urlencode "query=$Q" --data-urlencode "k=5" -o "$TMP/fcdev.json" -w '%{http_code}' > "$TMP/fcdev.http" 2>/dev/null
+  fi
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
   [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆配套技能缺失（找不到 $SKILLS/{baiduaisearchwithquota,baidu-ai-search}/scripts）。装上面任一名字的技能即可恢复本路，缺它不影响其余 12 路。" > "$TMP/qianfan.txt"; return; }
