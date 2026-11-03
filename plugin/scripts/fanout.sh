@@ -73,14 +73,16 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
     KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel"
-  _bad=""
+  _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
-    case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
+    case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
   done
+  # 猜错通道名不该报废整轮检索：剔掉不认识的继续跑（模型经常把抓取档当搜索通道，
+  # 比如 --on tf,jina —— jina 是抓取档不是搜索通道）。全都不认识就退回默认档。
   if [ -n "$_bad" ]; then
-    echo "[fanout] 未知通道:$_bad" >&2
-    echo "[fanout] 可用: $KNOWN" >&2
-    exit 2
+    echo "[fanout] 忽略未知通道:$_bad（可用: $KNOWN）" >&2
+    ON="${_good#,}"
+    [ -z "$ON" ] && echo "[fanout] 全部不认识，改跑默认档" >&2
   fi
 fi
 case "$N" in ''|*[!0-9]*) echo "[fanout] --n 必须是正整数" >&2; exit 2 ;; esac

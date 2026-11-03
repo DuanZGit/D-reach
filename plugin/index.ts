@@ -1949,7 +1949,11 @@ const searchTool = defineTool({
     ),
     channels: Type.Optional(
       Type.String({
-        description: "显式指定通道，逗号分隔，如 hn,exa；覆盖 profile",
+        description:
+          "显式指定通道（搜索通道，不是抓取档），逗号分隔；覆盖 profile。" +
+          "可选值：qianfan 千帆 / serper Google / tf TinyFish / exa 语义 / langsearch / " +
+          "fcdev Firecrawl Dev / fcs Firecrawl搜索 / fcres 论文 / tavily / parallel / " +
+          "se StackExchange / hn / jj 掘金 / segfault / oalex / crossref / bd BrightData / wiki",
       }),
     ),
     detail: Type.Optional(
