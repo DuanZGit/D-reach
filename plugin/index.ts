@@ -62,10 +62,27 @@ type Profile = keyof typeof PROFILES;
 // 社区，是最大的误判来源。
 const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
   {
+    // 「找 GitHub 项目」曾经被扔进 se+fcdev+hn 全灭：StackExchange 是问答站、
+    // HN 是新闻、fcdev 是文档索引，三路都不擅长搜仓库，而且没有一路能碰到 GitHub。
+    // 这条放最前，避免被 docs/local 的宽泛词抢走。
+    key: "repo",
+    re: /(github|开源项目|开源库|开源实现|\brepo\b|仓库|源码|star数|\bawesome\b|轮子)/i,
+    on: "gh,tf,qianfan",
+    why: "找开源项目：GitHub 仓库（★ 排序）+ TinyFish + 千帆",
+  },
+  {
     key: "academic",
     re: /(paper|arxiv|论文|文献|survey|benchmark|sota|研究综述|doi|citation)/i,
     on: "oalex,crossref,fcres",
     why: "学术：OpenAlex + Crossref + Research Index",
+  },
+  {
+    // 真实体验/口碑：小红书和 B 站的实测、避坑、锐评比搜索引擎的官方介绍有用得多。
+    // 放 local 之前 —— 「窑湖小镇 好玩吗 避坑」应该先看人怎么说，而不是先搜门票。
+    key: "social",
+    re: /(小红书|b站|bilibili|up主|博主|种草|拔草|避坑|避雷|探店|真实体验|真实评价|值不值|好用吗|值得买|测评|锐评)/i,
+    on: "xhs,bili,qianfan",
+    why: "真实体验/口碑：小红书 + B 站 + 千帆",
   },
   {
     // 「宜兴 窑湖小镇 万圣节 活动 门票 2026」也含 2026，本地生活必须排在时效前面，
@@ -110,6 +127,8 @@ const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
 
 // 判档的候选场景（模型分类与正则共用一套 key，避免两处定义分叉）
 const SCENE_CRITERIA: Record<string, string> = {
+  repo: "找现成的开源项目、GitHub 仓库、库、源码、轮子",
+  social: "真实体验、口碑、测评、避坑、种草：小红书、B 站、博主怎么说",
   academic: "学术论文、文献综述、benchmark、DOI、引用、研究综述",
   local: "本地生活与旅行：景点门票、酒店民宿、攻略、美食餐厅、活动展览",
   compare: "对比选型：几个方案哪个更好、有什么区别、替代品、值不值",

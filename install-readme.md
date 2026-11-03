@@ -48,7 +48,7 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 ```bash
 cd ~/.agents/skills/d-reach
 bash scripts/fanout.sh --list          # 应列出所有通道名
-bash scripts/fanout.sh "测试查询"       # 默认档 14 路，约 5 秒
+bash scripts/fanout.sh "测试查询"       # 默认档 15 路，约 5 秒
 python3 scripts/quota.py budget        # 看限额通道还剩多少
 python3 scripts/test_quota.py          # 记账逻辑自检（应打印「自检通过」）
 python3 scripts/gateway.py --port 3426  # 可选：可视化网关，浏览器开 http://127.0.0.1:3426/
@@ -63,7 +63,7 @@ ln -s "$(pwd)/plugin" ~/.pi/agent/extensions/d-reach
 #   d_reach_social B站/小红书登录态与搜索，bvid 可直接取字幕
 ```
 
-默认档 14 路里有 9 路**完全不需要 key**（Crossref 遇中文自动跳过），所以第一次跑就该有结果。
+默认档 15 路里有 9 路**完全不需要 key**（Crossref 遇中文自动跳过），所以第一次跑就该有结果。
 显示 `🔇 未配置 key` 属于正常 —— 千帆要装另一个技能、TinyFish 要 key，缺了自动跳过。
 
 ## 4. 密钥清单（按需填，全部可选）
@@ -171,7 +171,7 @@ OpenAlex、Crossref、GitHub（`gh` 登录即可）、DeepWiki、yt-dlp。
 ```bash
 cd ~/.agents/skills/d-reach
 
-# 默认档：14 路并发（9 路完全免 key，约 5s）
+# 默认档：15 路并发（12 路免 key，约 5s）
 bash scripts/fanout.sh "ollama vs vllm"
 
 # 深调研：追加 4 路限额通道（约 12s，自动记账）

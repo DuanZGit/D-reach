@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel"
+    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -167,6 +167,68 @@ charge() {
 want() { [ -z "$ON" ] && return 0; case ",$ON," in *",$1,"*) return 0;; esac; return 1; }
 
 # ---------- 免费免 Key 通道 ----------
+f_gh() {     # GitHub 仓库搜索（免 key，10 次/分钟）
+  # GitHub 只认英文且整句是 AND 匹配：「Home Assistant 3D floorplan dashboard card github」
+  # 整句传过去 total_count=0。所以抽 ASCII 词、剔掉 github/the/for 这类噪声、取前 4 个。
+  GQ=$(echo "$Q" | grep -oE '[A-Za-z0-9][A-Za-z0-9._+-]*' \
+       | grep -viE '^(github|repo|repository|the|a|an|of|for|and|to|in|on|with|how|what|best|3d|2d|ui|ux|api|app|web|ai|ml|ios|os)$' \
+       | head -4 | tr '\n' ' ')
+  # 抽不出英文词不是失败（中文 query 很正常），写空结果算 0 命中，不累计连败
+  [ -z "$GQ" ] && { echo '{"items":[],"total_count":0}' > "$TMP/gh.json"; return; }
+  curl -s --max-time 12 -G "https://api.github.com/search/repositories" \
+    -H "Accept: application/vnd.github+json" \
+    --data-urlencode "q=$GQ" --data-urlencode "sort=stars" \
+    --data-urlencode "order=desc" --data-urlencode "per_page=5" \
+    -o "$TMP/gh.json" -w '%{http_code}' > "$TMP/gh.http" 2>/dev/null
+}
+
+# 需要 cookie 的社交通道：连打必触发风控（小红书实测几次就 type=217 验证码），
+# 所以设最小调用间隔，冷却期内直接跳过而不是硬撞。
+social_gate() {   # $1=平台 $2=冷却秒数；0=放行，1=冷却中（stdout 给剩余分钟）
+  python3 - "$HOME/.agent-reach/social-last.json" "$1" "$2" <<'PY'
+import json, os, sys, time
+f, p, cd = sys.argv[1], sys.argv[2], int(sys.argv[3])
+try:
+    d = json.load(open(f))
+except Exception:
+    d = {}
+left = cd - (time.time() - d.get(p, 0))
+if left > 0:
+    print(int(left // 60) + 1)
+    sys.exit(1)
+d[p] = int(time.time())
+os.makedirs(os.path.dirname(f), exist_ok=True)
+json.dump(d, open(f, "w"))
+PY
+}
+
+f_xhs() {    # 小红书（需登录态 cookie；冷却 10 分钟）
+  local left
+  left=$(social_gate xhs 600) || { echo "cooldown:$left" > "$TMP/skip.xhs"; return; }
+  timeout 22 xhs search "$Q" --json > "$TMP/xhs.json" 2>/dev/null
+  # 风控验证码不是通道坏了，别计入连败把通道判死。先判 captcha 再看退出码。
+  if grep -q 'verification_required\|aptcha' "$TMP/xhs.json" 2>/dev/null; then
+    echo captcha > "$TMP/skip.xhs"; rm -f "$TMP/xhs.json"; return
+  fi
+  [ -s "$TMP/xhs.json" ] || rm -f "$TMP/xhs.json"
+}
+
+f_bili() {   # B 站视频搜索（需登录态；冷却 5 分钟）
+  local left
+  left=$(social_gate bili 300) || { echo "cooldown:$left" > "$TMP/skip.bili"; return; }
+  # B 站搜索是多词 AND：「智能家居 值得买 评测」0 条、「智能家居」3 条。
+  # 所以先取前 2 词，0 命中再退到首词。
+  # shellcheck disable=SC2086
+  set -- $Q
+  BQ="${1:-} ${2:-}"
+  timeout 22 bilibili video search --keyword "$BQ" --num 6 --json > "$TMP/bili.json" 2>/dev/null \
+    || { rm -f "$TMP/bili.json"; return; }
+  case "$(python3 -c "import json;print(json.load(open('$TMP/bili.json')).get('result',{}).get('count',0))" 2>/dev/null)" in
+    0) timeout 15 bilibili video search --keyword "${1:-}" --num 6 --json > "$TMP/bili.json" 2>/dev/null \
+         || rm -f "$TMP/bili.json" ;;
+  esac
+}
+
 f_se() {     # StackExchange 排障
   # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
   # shellcheck disable=SC2086
@@ -390,9 +452,10 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel; do launch "$fn"; done
-if [ "$DEEP" = 1 ]; then
-  for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel; do launch "$fn"; done
+# --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
+if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
+  for fn in f_langsearch f_exa f_fcres f_bd f_xhs f_bili; do launch "$fn"; done
 fi
 wait
 
@@ -604,6 +667,47 @@ def r_segfault():
                        r'<a[^>]+href="(/a/[0-9A-Za-z_-]+)"[^>]*>(.*?)</a>', t, re.S | re.I)
                    if len(clean(m.group(2))) > 4])
 
+def r_gh():
+    d = load_json("gh.json")
+    if d is None:
+        return None
+    items = d.get("items")
+    if not isinstance(items, list):
+        return None
+    return rowify([("%s ★%s" % (it.get("full_name", ""), it.get("stargazers_count", 0)),
+                    it.get("html_url", ""),
+                    trunc(it.get("description") or "", 100))
+                   for it in items])
+
+def r_xhs():
+    d = load_json("xhs.json")
+    if not isinstance(d, dict):
+        return None
+    items = (d.get("data") or {}).get("items")
+    if not isinstance(items, list):
+        return None
+    rows = []
+    for it in items[:6]:
+        nc = it.get("note_card") or {}
+        t = nc.get("display_title") or nc.get("desc") or ""
+        nid = it.get("id") or ""
+        if not t or not nid:
+            continue
+        rows.append((trunc(t, 80), "https://www.xiaohongshu.com/explore/" + nid, "小红书笔记"))
+    return rowify(rows)
+
+def r_bili():
+    d = load_json("bili.json")
+    if not isinstance(d, dict):
+        return None
+    vs = (d.get("result") or {}).get("videos")
+    if not isinstance(vs, list):
+        return None
+    return rowify([(trunc(v.get("title", ""), 80),
+                    "https://www.bilibili.com/video/" + v.get("bvid", ""),
+                    "%s · %s 播放 · %s" % (v.get("author", ""), v.get("play", ""), v.get("duration", "")))
+                   for v in vs[:6] if v.get("bvid")])
+
 def r_fcdev():
     d = load_json("fcdev.json")
     if d is None:
@@ -790,6 +894,7 @@ SECTIONS = [
     ("qianfan",  "百度千帆（生成式综合答案）",
      "⚠️ AI 浓缩回答、非来源链接 —— 关键结论必须另找一手源验证",
      lambda: load_text("qianfan.txt"), False),
+    ("gh",       "GitHub 仓库搜索（★ 排序，免 Key）", "免 Key 10 次/分钟；只认英文关键词", r_gh, False),
     ("fcdev",    "Firecrawl Developer Index（编程一手源 70M+）", "免 Key 不限量", r_fcdev, False),
     ("se",       "StackExchange（报错排障）", "免 Key 不限量", r_se, False),
     ("hn",       "Hacker News（深技术讨论）", "免 Key 不限量", r_hn, False),
@@ -803,6 +908,8 @@ SECTIONS = [
     ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
     ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
+    ("xhs",      "小红书（种草/体验/避坑）", "需登录态 cookie；冷却 10 分钟", r_xhs, True),
+    ("bili",     "B 站视频（实测/教程/评测）", "需登录态；冷却 5 分钟", r_bili, True),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
@@ -913,7 +1020,9 @@ skipped, failed = [], []
 for key, name, note, fn, deep_only in SECTIONS:
     if ONLY and key not in ONLY:
         continue                      # 本轮没请求这条路 → 不渲染（≠无响应）
-    if deep_only and DEEP != "1" and not os.path.exists(os.path.join(tmp, "skip." + key)):
+    # --on 显式点名时，deep 档通道也要渲染，否则 `--on xhs` 跑完结果被丢掉
+    if deep_only and DEEP != "1" and key not in [c for c in (ON or "").split(",") if c] \
+            and not os.path.exists(os.path.join(tmp, "skip." + key)):
         continue
     skip = read_skip(key)
     if skip == "health":
@@ -942,6 +1051,15 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "cjk":
         print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
               f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
+        skipped.append(name); mark(key, "skip")
+        continue
+    if skip and skip.startswith("cooldown:"):
+        print(f"### 🔇 {name} —— {skip.split(':', 1)[1]} 分钟内刚搜过，本轮跳过"
+              f"（这类通道连打会触发风控验证码，所以设了最小间隔）\n")
+        skipped.append(name); mark(key, "skip")
+        continue
+    if skip == "captcha":
+        print(f"### 🔇 {name} —— 平台风控要验证码，本轮跳过（等几小时或换个词；不影响其余通道）\n")
         skipped.append(name); mark(key, "skip")
         continue
     if skip == "err":
