@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-  KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd"
+    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel"
   _bad=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
@@ -129,6 +129,16 @@ gate() {
     return 0   # TinyFish search $0.00/次 → 不走 quota 记账
   elif [ "$svc" = "brightdata" ]; then
     BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "serper" ]; then
+    # Serper = Google 结果，2,500 次一次性赠送（不是每月重置），之后 $1/1000
+    # 实测 1.85s 回 5 条，比 BrightData 快 5 倍、便宜得多 → 本地生活/电商首选
+    SP_KEY=$(sh "$DIR/load_key.sh" SERPER_API_KEY https://serper.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+  elif [ "$svc" = "firecrawl_search" ]; then
+    # Firecrawl /search 走同一个 key，消耗 firecrawl credits（1 credit/次左右）
+    FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
+    svc="firecrawl"
+  elif [ "$svc" = "wiki" ]; then
+    return 0   # Wikipedia REST API 完全免费无限量，不验 key 不记账
   fi
   python3 "$QUOTA" check "$svc" >/dev/null 2>&1; _qrc=$?
   # 0=正常，2=已过裕度线（仍可跑）；1=越免费线 → 跳过
@@ -180,7 +190,9 @@ f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时
     --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" -w '%{http_code}' > "$TMP/crossref.http" 2>/dev/null
 }
 f_segfault() { # SegmentFault 中文技术长尾（-L 跟跳转；博客园已废弃）
-  curl -sL --compressed --max-time 14 -A "$UA" -G "https://segmentfault.com/search" \
+  # 实测同站响应 2.3–11.4s 波动（q=rust 2.8s，q="rust tokio" 11.4s），
+  # 14s 上限在并发时会被掐掉，放宽到 20s 让它跑完。
+  curl -sL --compressed --max-time 20 -A "$UA" -G "https://segmentfault.com/search" \
     --data-urlencode "q=$Q" -o "$TMP/segfault.html" -w '%{http_code}' > "$TMP/segfault.http" 2>/dev/null
 }
 f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
@@ -254,6 +266,89 @@ f_fcres() {
     --data-urlencode "query=$Q" --data-urlencode "k=5" \
     -o "$TMP/fcres.json" -w '%{http_code}' > "$TMP/fcres.http" 2>/dev/null
 }
+f_serper() {
+  gate serper || return 0
+  curl -s --max-time 20 -X POST "https://google.serper.dev/search" \
+    -H "X-API-KEY: $SP_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys,re;q=sys.argv[1];print(json.dumps({"q":q,"num":10,"gl":"cn" if re.search(r"[\u4e00-\u9fff]",q) else "us","hl":"zh-cn" if re.search(r"[\u4e00-\u9fff]",q) else "en"}))' "$Q")" \
+    -o "$TMP/serper.json" -w '%{http_code}' > "$TMP/serper.http" 2>/dev/null
+  [ "$(cat "$TMP/serper.http" 2>/dev/null)" = "200" ] && charge serper
+}
+f_tavily() {   # Tavily keyless：无账号无 key，结果带 1400 字级正文摘录
+  # 免费档按 IP 限速（官方称约 30 次/IP 后 429 hourly_cap_reached），不记账。
+  # 与 serper 的区别：serper 只给标题+两行 snippet，它给整段正文，中文 query 实测 5/5 命中。
+  curl -s --max-time 20 -X POST "https://api.tavily.com/search" \
+    -H 'Content-Type: application/json' -H 'X-Tavily-Access-Mode: keyless' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"max_results":8}))' "$Q")" \
+    -o "$TMP/tavily.json" -w '%{http_code}' > "$TMP/tavily.http" 2>/dev/null
+}
+f_parallel() {   # Parallel 免费 MCP（web_search）：无 key 无账号，结果带 excerpts + 发布日期
+  # 走 MCP 握手（initialize → notifications/initialized → tools/call），交给 mcp_call.py。
+  python3 "$DIR/mcp_call.py" https://mcp.parallel.ai/mcp web_search \
+    "$(python3 -c 'import json,sys;q=sys.argv[1];print(json.dumps({"objective":q,"search_queries":[q]}))' "$Q")" \
+    > "$TMP/parallel.json" 2>/dev/null
+  # 失败时脚本打 MCP_ERROR 行（不是 JSON），标 skip 而不是让解析器报「无响应」
+  if [ "$(head -c 11 "$TMP/parallel.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
+    head -c 300 "$TMP/parallel.json" > "$TMP/skip.parallel"
+    : > "$TMP/parallel.json"
+  fi
+}
+f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
+  gate firecrawl_search || return 0
+  curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
+    -H "Authorization: Bearer $FC_KEY" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":8}))' "$Q")" \
+    -o "$TMP/fcs.json" -w '%{http_code}' > "$TMP/fcs.http" 2>/dev/null
+  [ "$(cat "$TMP/fcs.http" 2>/dev/null)" = "200" ] && charge firecrawl
+}
+f_wiki() {   # Wikipedia REST summary：概念/人物/术语/地名，0.7s、完全免费、无限量
+  gate wiki || return 0
+  # 「紫砂壶是什么」这种疑问句直接搜 opensearch 会返回空数组（没有条目叫这个名字），
+  # 要先剥掉疑问词再搜，否则回退成整个 query 去取 summary 必然 404
+  STRIP='import re,sys
+q=sys.argv[1]
+q=re.sub(r"(是什么|是谁|什么是|的定义是什么|的定义|的原理是什么|的原理|的历史|的由来|怎么用|如何使用|有什么用|介绍一下|是什么意思)[？?。，,]*$","",q.strip())
+q=re.sub(r"^(什么是|介绍一下|讲讲)", "", q)
+print(q.strip() or sys.argv[1])'
+  BASEQ=$(python3 -c "$STRIP" "$Q" 2>/dev/null || echo "$Q")
+  os_search() {
+    curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" -G \
+      "https://zh.wikipedia.org/w/api.php" \
+      --data-urlencode "action=opensearch" --data-urlencode "search=$1" \
+      --data-urlencode "limit=1" --data-urlencode "format=json" \
+      | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); print(d[1][0] if d[1] else "")
+except Exception: print("")' 2>/dev/null
+  }
+  # 多词 query（「杭州 西湖 门票」）opensearch 常返空；再用 list=search 兜底取首条标题。
+  # 两轮都空说明维基确实没有对应条目 —— 此时记 0 命中，不能留 404（会被误判成通道故障）。
+  ls_search() {
+    curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" -G \
+      "https://zh.wikipedia.org/w/api.php" \
+      --data-urlencode "action=query" --data-urlencode "list=search" \
+      --data-urlencode "srsearch=$1" --data-urlencode "srlimit=1" \
+      --data-urlencode "format=json" \
+      | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); s=(d.get("query") or {}).get("search") or []; print(s[0]["title"] if s else "")
+except Exception: print("")' 2>/dev/null
+  }
+  TITLE=$(os_search "$Q")
+  [ -z "$TITLE" ] && TITLE=$(os_search "$BASEQ")
+  [ -z "$TITLE" ] && TITLE=$(ls_search "$BASEQ")
+  [ -z "$TITLE" ] && TITLE=$(ls_search "$Q")
+  if [ -z "$TITLE" ]; then
+    printf '{"type":"none"}' > "$TMP/wiki.json"
+    printf '200' > "$TMP/wiki.http"
+    return 0
+  fi
+  # REST summary 端点自己会跟随繁简重定向（/w/api.php?redirects=1 对中文维基的繁简重定向不生效，
+  # 「紫砂壶」会拿到「簡繁重定向」那段说明文字而不是正文）
+  ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].replace(" ","_")))' "$TITLE" 2>/dev/null)
+  curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" "https://zh.wikipedia.org/api/rest_v1/page/summary/$ENC" \
+    -o "$TMP/wiki.json" -w '%{http_code}' > "$TMP/wiki.http" 2>/dev/null
+}
 f_bd() {
   gate brightdata || return 0
   # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
@@ -283,16 +378,32 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel; do launch "$fn"; done
 if [ "$DEEP" = 1 ]; then
   for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
 wait
 
 # ---------- 渲染 ----------
+# 本轮起始时间：给 history.jsonl 算耗时用（调用方已给就沿用，比如插件那边能算得更准）
+[ -n "${D_REACH_T0:-}" ] || D_REACH_T0=$(date +%s)
+export D_REACH_T0
+
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
-import json, os, re, sys, html, pathlib
+import json, os, re, sys, html, pathlib, time
 from datetime import datetime, timezone
+
+# 收集本轮全部输出，历史详情（网关点一条看全文）要用 —— 覆盖 print 而不是到处插 buf.append
+_REAL_PRINT = print
+_OUT = []
+def print(*a, **k):
+    import io as _io
+    _b = _io.StringIO()
+    k2 = dict(k); k2["file"] = _b
+    _REAL_PRINT(*a, **k2)
+    _OUT.append(_b.getvalue())
+    if k.get("file") is sys.stdout or "file" not in k:
+        _REAL_PRINT(*a)
 
 tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
 N = max(1, min(N, 20))
@@ -565,6 +676,77 @@ def r_exa():
                     trunc(x.get("snippet") or x.get("text") or "", 100))
                    for x in d.get("results") or []])
 
+def r_tavily():
+    d = load_json("tavily.json")
+    if d is None:
+        return None
+    if d.get("error") or d.get("detail"):
+        return ("ERR", trunc(str(d.get("error") or d.get("detail")), 200))
+    items = d.get("results") if isinstance(d.get("results"), list) else None
+    if items is None:
+        return rowify(walk_generic(d))
+    # content 是整段正文（实测 1300–1500 字），截到 120 字作摘要
+    return rowify([(it.get("title", ""), it.get("url", ""), trunc(it.get("content") or "", 120))
+                   for it in items])
+
+def r_parallel():
+    d = load_json("parallel.json")
+    if d is None:
+        return None
+    items = d.get("results") if isinstance(d.get("results"), list) else None
+    if items is None:
+        return rowify(walk_generic(d))
+    rows = []
+    for it in items:
+        ex = it.get("excerpts") or []
+        snip = trunc(" ".join(str(e) for e in ex), 120) if ex else ""
+        # 发布日期对「最新/时效」类问题有用，拼进摘要最前面
+        if it.get("publish_date"):
+            snip = f"[{it['publish_date']}] {snip}"
+        rows.append((it.get("title", ""), it.get("url", ""), snip))
+    return rowify(rows)
+
+def r_serper():
+    d = load_json("serper.json")
+    if d is None:
+        return None
+    if d.get("message") or d.get("error"):
+        return ("ERR", trunc(str(d.get("message") or d.get("error")), 200))
+    rows = list(d.get("organic") or [])
+    # knowledgeGraph（实体卡：门店/品牌/景点）常常是本地生活最准的那条，排在最前
+    kg = d.get("knowledgeGraph") or {}
+    if kg.get("title") and kg.get("descriptionLink"):
+        rows.insert(0, {"title": kg.get("title"), "link": kg.get("descriptionLink"),
+                        "snippet": kg.get("description", "")})
+    return rowify([(x.get("title", ""), x.get("link", ""),
+                    trunc(x.get("snippet") or "", 100)) for x in rows])
+
+def r_fcs():
+    d = load_json("fcs.json")
+    if d is None:
+        return None
+    if d.get("success") is False:
+        return ("ERR", trunc(str(d.get("error") or "firecrawl search failed"), 200))
+    return rowify([(x.get("title") or "", x.get("url") or "",
+                    trunc(x.get("description") or x.get("markdown") or "", 100))
+                   for x in (d.get("data") or [])])
+
+def r_wiki():
+    d = load_json("wiki.json")
+    if d is None:
+        return None
+    if d.get("type") == "none":
+        return []                                  # 无对应条目 = 0 命中，不是通道故障
+    if d.get("type") == "disambiguation" or d.get("title") is None:
+        return ("ERR", "维基百科没有这个条目（或只有消歧义页）")
+    title = d.get("title") or ""
+    ex = (d.get("extract") or "").strip()
+    if not title or not ex:
+        return ("ERR", "维基百科条目没有正文")
+    url = ((d.get("content_urls") or {}).get("desktop") or {}).get("page") \
+        or "https://zh.wikipedia.org/wiki/" + title.replace(" ", "_")
+    return rowify([(title, url, trunc(ex, 100))])
+
 def r_fcres():
     d = load_json("fcres.json")
     if d is None:
@@ -604,13 +786,18 @@ SECTIONS = [
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
     ("tf",      "TinyFish Search（官方 hosted MCP，$0/次）", "需 TINYFISH_API_KEY", r_tf, False),
+    ("serper",  "Serper Google（本地生活/电商最强）", "2,500 次一次性赠送，已 quota.py use", r_serper, False),
+    ("tavily",  "Tavily keyless（无账号，正文摘录）", "免费无 key；约 30 次/IP 后 429，不记账", r_tavily, False),
+    ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
+    ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
+    ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
     ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
@@ -648,6 +835,7 @@ def save_health(h):
 health = load_health()
 now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
 def mark(key, status):
     """只记「连败几次 + 最后成败时间」。skip 不计失败，避免本轮没请求把通道判死。
 
@@ -655,6 +843,7 @@ def mark(key, status):
     真出现反复误杀再提到环境变量。
     """
     v = health.setdefault(key, {"streak_fail": 0})
+    ROUND.append({"key": key, "status": status})
     if status == "ok":
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
@@ -737,6 +926,43 @@ if weak:
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
+
+# ---------- 历史记录 ----------
+# 网关和插件都靠它显示「最近查了什么、谁发起的、哪几路给了结果」。
+# 写失败不影响本轮输出：历史只是附加物。
+try:
+    hist = pathlib.Path(os.path.expanduser("~/.agent-reach/history.jsonl"))
+    hist.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        secs = round(time.time() - float(os.environ.get("D_REACH_T0") or 0), 1)
+    except Exception:
+        secs = 0.0
+    rec = {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "query": Q,
+        "on": ON or "",
+        "deep": DEEP == "1",
+        "source": os.environ.get("D_REACH_SOURCE") or "cli",
+        "secs": secs,
+        "ok": okc, "zero": zero, "fail": len(failed), "skip": len(skipped),
+        "results": ROUND,
+    }
+    with hist.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    # 只留最近 200 条，别让文件无限长
+    keep = hist.read_text(encoding="utf-8").splitlines()[-200:]
+    hist.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    # 每轮的完整 markdown 落一份，网关「点历史看详情」用
+    # 文件名用 ts 前缀（精度到秒，与 rec.ts 对得上）；留 30 份
+    rdir = pathlib.Path(os.path.expanduser("~/.agent-reach/rounds"))
+    rdir.mkdir(parents=True, exist_ok=True)
+    stamp = rec["ts"].replace("-", "").replace(":", "").replace("T", "-").split("+")[0]
+    (rdir / f"{stamp}.md").write_text("".join(_OUT), encoding="utf-8")
+    olds = sorted(rdir.glob("*.md"))
+    for o in olds[:-30]:
+        o.unlink(missing_ok=True)
+except Exception:
+    pass
 PY
 
 # 跑完自动校准官方额度（本地计数 ≠ 厂商剩余；校准结果写入 quota.json 的 _official 段）

@@ -15,9 +15,11 @@ BrightData / Jina / Firecrawl / browser_use。本机**没有注册 BrightData �
 | ③ | curl 直连 | 免费，0.1s | **默认起点**。桌面 UA + `--compressed` |
 | ④ | 本地 Playwright | 免费，1.5s | curl 拿回空壳（正文靠 JS 渲染） |
 | ⑤ | TinyFish fetch | 免费额度 | ④ 也失败时的托管渲染 |
-| ⑥ | Jina Reader | 免费额度 | 零配置兜底 |
-| ⑦ | BrightData | 5000 次/月 | 真反爬站 |
-| ⑧ | archive.today | 免费 | 公开存档兜底（本机这条出站不通，见下） |
+| ⑥ | Parallel fetch | 免费无 key | ⑤ 拿不到时的第二家托管抽取（索引不同，一家抽不出另一家可能行） |
+| ⑦ | Jina Reader | 免费无 key（20 RPM） | 零配置兜底 |
+| ⑧ | markdown.new | 免费无 key | Jina 限流或欠费时的等价备选 |
+| ⑨ | BrightData | 5000 次/月 | 真反爬站 |
+| ⑩ | archive.today | 免费 | 公开存档兜底（本机这条出站不通，见下） |
 
 ③ 的模板：
 
@@ -42,7 +44,42 @@ node "$SKILLS/d-reach/plugin/scripts/render.mjs" "$URL"
 `<noscript>` 在真浏览器里是没意义的，渲染前要整块删掉 —— 脚本启用时浏览器把它当原始文本，
 innerText 会把里面的整段 JS 吐出来（实测淘宝搜索页吐了 4 万字 JS 冒充正文）。
 
-装了 pi 插件就直接 `d_reach_fetch`，上面八档和判据它内部都做了，不用手写。
+装了 pi 插件就直接 `d_reach_fetch`，上面十档和判据它内部都做了，不用手写。
+
+## markdown.new（Jina 的等价备选）
+
+`https://markdown.new/<url>` 直接返回干净 markdown，头格式与 Jina 几乎一样
+（Title / URL Source / Markdown Content），**免费、无 key、免注册**。
+Jina 撞 20 RPM 限流时用它顶一档，不必等冷却。
+
+```bash
+curl -sL --compressed --max-time 30 -A "$UA" "https://markdown.new/https://example.com"
+```
+
+判成败：响应以 `Error` / `Failed` / `Unable to` / `Could not` 开头时，那是它自己的
+错误说明而不是正文，不能当内容收下（`d_reach_fetch` 的 `viaMarkdownNew` 已内置这条判定）。
+
+## Parallel MCP（搜索 / 抓取 / 类型化判断，全免费无 key）
+
+`https://mcp.parallel.ai/mcp` 是标准 MCP streamable-HTTP 服务，无 key 无账号，
+三个工具：`web_search`、`web_fetch`、`web_decisions`。走 MCP 握手（initialize →
+notifications/initialized → tools/call），本仓库已封装：
+
+```bash
+python3 scripts/mcp_call.py https://mcp.parallel.ai/mcp web_search \
+  '{"objective":"找 rust async 对比","search_queries":["rust tokio 2026"]}'
+```
+
+`web_decisions` 是「拿网页证据打类型化判断」，**三种类型的 criteria 形状各不相同**，
+错一个字段整轮 400（实测踩过）：
+
+| type | criteria 形状 | 返回 |
+|---|---|---|
+| `choice` | 字典，≥2 项（key=候选结论，value=判据） | `choice` 成立的那个 key + `probabilities` |
+| `score` | 数组，≥2 项（每项一条判据） | 0..1 的 `score` + `legend` |
+| `noul` | `{"true":..., "false":...}` | `noul` 概率（越接近 1 越支持 true） |
+
+三种都必填 `instructions`。插件里对应 `d_reach_decide` 工具，已把 schema 说明写进工具描述。
 
 ## BrightData Web Unlocker（反爬主力，5000 次/月）
 
@@ -70,6 +107,13 @@ curl -s --max-time 30 "https://r.jina.ai/https://example.com/article"
 
 只吃 URL，不吃关键词。微信公众号走单独一条直连档（见下），别用 Jina。
 
+**带 key 反而可能抓不到。** Jina 的 key 是预充值 token 包，不是无限免费额度：余额 0 时带 key
+一律返回 `HTTP 402 InsufficientBalanceError`（错误体是 JSON，容易被当成正文）。无 key 档按 IP
+免费（20 RPM），单次抓取完全够用。2026-11-04 实测本机 key 余额为 0，已从 `~/.config/agents/env`
+移除；`d_reach_fetch` 的 Jina 档现在遇到 402 会自动去掉 key 重试一次。
+
+如果哪天又配了 key 并看到 402，别去改抓取逻辑：**这个 key 没钱了**，要么充值要么删掉。
+
 ## 微信公众号
 
 **永久链 `/s/*` 先走直连，不要一上来就 BrightData。** 2026-10-29 实测：桌面 UA、
@@ -88,11 +132,11 @@ grep -q 'id="js_content"' /tmp/wx.html && echo 正文在 || echo 被风控了
 
 - 装了插件就直接 `d_reach_fetch`，它内部就是这个逻辑（`viaWeixinDirect`），免费不耗额度。
 - **两种链接形态都要认**：永久链是 `/s/<token>`，历史文章和分享链是 `/s?__biz=...&sn=...`。
-  只按 `/s/` 判断会把长链漏到通用档去，白跑完八档才拿到导航。
+  只按 `/s/` 判断会把长链漏到通用档去，白跑完全部降级档才拿到导航。
 - **老文章链接缺 `chksm` 参数会拿到验证页**，这不是限流也不是工具问题：
   微信只接受带 `chksm` 的旧文章链接。要从文章页复制完整链接，别自己拼 `__biz/mid/idx/sn`。
 - **安全验证页要当场认出**：响应里出现 `secitptpage/verify`（约 17KB、只有 JS、没有 `#js_content`）
-  就是被风控了，立刻停手（0.3s），别把八档跑一遍（实测 37–43 秒且只会加重）。
+  就是被风控了，立刻停手（0.3s），别把全部降级档跑一遍（实测 37–43 秒且只会加重）。
   加 `Referer`、加 `Accept-Language` 实测都无效。
 - **批量仍会撞风控**：实测每抓 13~21 篇后要锁 15~27 分钟。批量任务必须有退避，不要并发轰。
 - 主页 / 视频号 / 历史推送列表（`/mp/profile_ext`、`/mp/homepage`、`/cgi-bin/`、`/finder/`）
@@ -225,9 +269,15 @@ for e in feedparser.parse('FEED_URL').entries[:5]:
 | 4 | **JS 源码冒充正文** | 符号密度异常高，出现 `function(`、`!function(e)` | 淘宝子框架 15 万字 bundle |
 | 5 | **抓取方自报空壳** | 正文里有 `maybe not yet fully loaded`、`cached snapshot` | Jina 对纯 JS 页返回 526 字符 + 这句 |
 | 6 | **扫描件 PDF** | PDF 有页数但抽不出文字 | arxiv 论文没事，扫描件必须报「需 OCR」 |
+| 7 | **目标页本身就是 404** | 抓取方返回的 HTTP 状态码是 404/410，正文却是正常中文 | example.com 的 404 路径被 Playwright 渲染出 917 字正常文本 |
 
 **电商页另外加一条**：淘宝/天猫/京东的列表页和详情页有商品就一定有价格符号（`¥` / `￥`）。
 只剩导航 + 「加载中...」而没有价格时，就是空壳，不管字符数多长。
+
+**第 7 种只能靠状态码认，靠正文认不出来**：404 页往往是一段人话（「页面不存在」或干脆是站点首页），
+字符数和行长度全部合格。所以抓取时必须把目标站的状态码带出来（`render.mjs` 输出 `httpStatus`，
+`curl` 档看 `%{http_code}`），4xx/5xx 时先判状态码再判正文。403 例外：Cloudflare 挑战页是 403
+但正文有内容，那种交给反爬判据处理。
 
 判据的顺序很重要：**先看「太短」（< 120 字符）再看「骨架」**。两者都命中时
 宁说「内容不足」也不要说「反爬」—— 后者会让人去搞 cookie，而其实只是页面没东西。

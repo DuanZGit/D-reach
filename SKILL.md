@@ -28,7 +28,7 @@ upstream:
 ---
 
 > **pi 用户**：本技能另有一个插件版（`pi-extension/d-reach.ts`），三件事已做成原生工具：
-> `d_reach`（检索，auto/quick/base/deep 四档）、`d_reach_fetch`（抓 URL，八档自动降级：
+> `d_reach`（检索，auto/quick/base/deep 四档）、`d_reach_fetch`（抓 URL，十档自动降级：
 > 微信直连 → cookie 注入 → curl → **Playwright 本地渲染** → TinyFish → Jina → BrightData → archive.today）、
 > `d_reach_quota`（额度+健康）、`d_reach_social`（B站/小红书登录态体检与搜索）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
 >
@@ -42,13 +42,13 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：13 条路里 9 路走默认档（7 路完全免 key、千帆需配套技能、TinyFish 需 key 但 $0/次）、4 路限额通道月余量 >96%
+> 理由很直白：18 条路里 14 路走默认档（9 路完全免 key 免注册：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、4 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 >
 > 🧩 **配套技能（不在本仓里）**：千帆那一路靠第三方技能 `baiduaisearchwithquota`（克隆版目录名）或
 > `baidu-ai-search`（viking 按 slug 落的目录名），两者同一个包。只装 d-reach 不装它，千帆路会标 err 跳过，
-> 其余 12 路照跑。装法：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`。
+> 其余 13 路照跑。装法：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`。
 
 把"用户想找信息"翻译成"用哪个通道、怎么调用"。**路由表由你（agent）直接执行**，
 没有中间脚本；唯一的代码是 `scripts/quota.py`，它只负责记额度。
@@ -451,7 +451,7 @@ BrightData 真实用量可对账：`curl -s -H "Authorization: Bearer $BRIGHTDAT
 | [references/channels.md](references/channels.md) | **13 个通道逐个写清擅长/不擅长/代价/别用它做什么** —— 规则没命中时照着它选 `channels` |
 | [references/cn-reach.md](references/cn-reach.md) | **国内网络环境实测通道总表**（可达/不可达 + 替代链 + 细分路由）——选路前先看它 |
 | [references/search.md](references/search.md) | 搜索通道完整参数、**查询改写矩阵与分档调用序列** |
-| [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS / **抓取八档顺序与「假成功的六种形态」** |
+| [references/scrape.md](references/scrape.md) | 抓取 / 网页阅读 / 公众号 / RSS / **抓取十档顺序与「假成功的六种形态」** |
 | [references/social.md](references/social.md) | 微博 / V2EX / Reddit / 公众号 / 豆瓣 / 知乎 |
 | [references/dev.md](references/dev.md) | gh CLI / DeepWiki / StackExchange / 掘金 完整用法 |
 | [references/video.md](references/video.md) | YouTube / B站 / 播客字幕 |

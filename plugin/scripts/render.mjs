@@ -178,7 +178,13 @@ try {
     extraHTTPHeaders: { "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" },
   });
   const page = await ctx.newPage();
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_MS });
+  const resp = await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: TIMEOUT_MS,
+  });
+  // 目标站状态码：chromium 会把 404 页照常渲染出正文，不带上这个值，
+  // 调用方只能看到「抓到了 900 字」，把错误页当文章交付。
+  const httpStatus = resp ? resp.status() : 0;
   await page.waitForTimeout(SETTLE_MS);
   const out = await snapshot(page);
   let text = out.text;
@@ -212,6 +218,7 @@ try {
         ) / 10,
       linkDen: Math.round(out.linkDen * 100) / 100,
       finalUrl: page.url(),
+      httpStatus,
       ms: Date.now() - t0,
     }),
   );

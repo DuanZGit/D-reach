@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-  KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki"
+    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel"
   _bad=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) ;; *) _bad="$_bad $_c" ;; esac
@@ -190,7 +190,9 @@ f_crossref() { # DOI 权威元数据（⚠️ 中文 query 会跑偏 → CJK 时
     --data-urlencode 'select=title,DOI,URL,published' -o "$TMP/crossref.json" -w '%{http_code}' > "$TMP/crossref.http" 2>/dev/null
 }
 f_segfault() { # SegmentFault 中文技术长尾（-L 跟跳转；博客园已废弃）
-  curl -sL --compressed --max-time 14 -A "$UA" -G "https://segmentfault.com/search" \
+  # 实测同站响应 2.3–11.4s 波动（q=rust 2.8s，q="rust tokio" 11.4s），
+  # 14s 上限在并发时会被掐掉，放宽到 20s 让它跑完。
+  curl -sL --compressed --max-time 20 -A "$UA" -G "https://segmentfault.com/search" \
     --data-urlencode "q=$Q" -o "$TMP/segfault.html" -w '%{http_code}' > "$TMP/segfault.http" 2>/dev/null
 }
 f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源，⭐ 免 key）
@@ -271,6 +273,25 @@ f_serper() {
     -d "$(python3 -c 'import json,sys,re;q=sys.argv[1];print(json.dumps({"q":q,"num":10,"gl":"cn" if re.search(r"[\u4e00-\u9fff]",q) else "us","hl":"zh-cn" if re.search(r"[\u4e00-\u9fff]",q) else "en"}))' "$Q")" \
     -o "$TMP/serper.json" -w '%{http_code}' > "$TMP/serper.http" 2>/dev/null
   [ "$(cat "$TMP/serper.http" 2>/dev/null)" = "200" ] && charge serper
+}
+f_tavily() {   # Tavily keyless：无账号无 key，结果带 1400 字级正文摘录
+  # 免费档按 IP 限速（官方称约 30 次/IP 后 429 hourly_cap_reached），不记账。
+  # 与 serper 的区别：serper 只给标题+两行 snippet，它给整段正文，中文 query 实测 5/5 命中。
+  curl -s --max-time 20 -X POST "https://api.tavily.com/search" \
+    -H 'Content-Type: application/json' -H 'X-Tavily-Access-Mode: keyless' \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"max_results":8}))' "$Q")" \
+    -o "$TMP/tavily.json" -w '%{http_code}' > "$TMP/tavily.http" 2>/dev/null
+}
+f_parallel() {   # Parallel 免费 MCP（web_search）：无 key 无账号，结果带 excerpts + 发布日期
+  # 走 MCP 握手（initialize → notifications/initialized → tools/call），交给 mcp_call.py。
+  python3 "$DIR/mcp_call.py" https://mcp.parallel.ai/mcp web_search \
+    "$(python3 -c 'import json,sys;q=sys.argv[1];print(json.dumps({"objective":q,"search_queries":[q]}))' "$Q")" \
+    > "$TMP/parallel.json" 2>/dev/null
+  # 失败时脚本打 MCP_ERROR 行（不是 JSON），标 skip 而不是让解析器报「无响应」
+  if [ "$(head -c 11 "$TMP/parallel.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
+    head -c 300 "$TMP/parallel.json" > "$TMP/skip.parallel"
+    : > "$TMP/parallel.json"
+  fi
 }
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
@@ -357,7 +378,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf f_serper f_fcs f_wiki; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel; do launch "$fn"; done
 if [ "$DEEP" = 1 ]; then
   for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
@@ -655,6 +676,36 @@ def r_exa():
                     trunc(x.get("snippet") or x.get("text") or "", 100))
                    for x in d.get("results") or []])
 
+def r_tavily():
+    d = load_json("tavily.json")
+    if d is None:
+        return None
+    if d.get("error") or d.get("detail"):
+        return ("ERR", trunc(str(d.get("error") or d.get("detail")), 200))
+    items = d.get("results") if isinstance(d.get("results"), list) else None
+    if items is None:
+        return rowify(walk_generic(d))
+    # content 是整段正文（实测 1300–1500 字），截到 120 字作摘要
+    return rowify([(it.get("title", ""), it.get("url", ""), trunc(it.get("content") or "", 120))
+                   for it in items])
+
+def r_parallel():
+    d = load_json("parallel.json")
+    if d is None:
+        return None
+    items = d.get("results") if isinstance(d.get("results"), list) else None
+    if items is None:
+        return rowify(walk_generic(d))
+    rows = []
+    for it in items:
+        ex = it.get("excerpts") or []
+        snip = trunc(" ".join(str(e) for e in ex), 120) if ex else ""
+        # 发布日期对「最新/时效」类问题有用，拼进摘要最前面
+        if it.get("publish_date"):
+            snip = f"[{it['publish_date']}] {snip}"
+        rows.append((it.get("title", ""), it.get("url", ""), snip))
+    return rowify(rows)
+
 def r_serper():
     d = load_json("serper.json")
     if d is None:
@@ -736,6 +787,8 @@ SECTIONS = [
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
     ("tf",      "TinyFish Search（官方 hosted MCP，$0/次）", "需 TINYFISH_API_KEY", r_tf, False),
     ("serper",  "Serper Google（本地生活/电商最强）", "2,500 次一次性赠送，已 quota.py use", r_serper, False),
+    ("tavily",  "Tavily keyless（无账号，正文摘录）", "免费无 key；约 30 次/IP 后 429，不记账", r_tavily, False),
+    ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
     ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
@@ -744,7 +797,7 @@ SECTIONS = [
     ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):

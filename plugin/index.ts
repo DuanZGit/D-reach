@@ -5,7 +5,7 @@
  *
  *   d_reach         并发检索（auto 按场景选路 / quick / base / deep）
  *   d_reach_fetch   抓一个 URL：微信直连 / cookie 注入 / curl / Playwright / TinyFish / Jina / BrightData / archive.today
- *                   八档降级，失败按网络·反爬·付费墙·登录墙·解析分类，能说清「该不该重试」
+ *                   十档降级，失败按网络·反爬·付费墙·登录墙·解析分类，能说清「该不该重试」
  *   d_reach_quota   额度与通道健康（可选顺带跑一次官方校准）
  *
  *   /reach、/reach-deep   交互式跑一轮，结果只弹通知
@@ -14,6 +14,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,13 +25,20 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const run = promisify(execFile);
-const SKILL_DIR = join(homedir(), ".agents/skills/d-reach");
+// 脚本目录解析：先用扩展自身 scripts/（内为指向 skill 的软链，一处真源），
+// 再回退到历史路径 ~/.agents/skills/d-reach。写死单一历史路径会在
+// 技能实际装在 ~/.pi/agent/skills 时报 ENOENT，四个工具全废。
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SKILL_DIR = existsSync(join(HERE, "scripts", "fanout.sh"))
+  ? HERE
+  : join(homedir(), ".agents/skills/d-reach");
 const FANOUT = join(SKILL_DIR, "scripts", "fanout.sh");
 const KEY_SH = join(SKILL_DIR, "scripts", "load_key.sh");
 const PROBE = join(SKILL_DIR, "scripts", "quota_probe.py");
-const HERE = dirname(fileURLToPath(import.meta.url));
 const RENDER = join(HERE, "scripts", "render.mjs");
 const PDF2TEXT = join(HERE, "scripts", "pdf2text.py");
+const MCP_CALL = join(SKILL_DIR, "scripts", "mcp_call.py");
+const PARALLEL_MCP = "https://mcp.parallel.ai/mcp";
 const DATA_DIR = join(homedir(), ".agent-reach");
 const LAST_RUN = join(DATA_DIR, "last-run.md");
 const UA =
@@ -614,6 +622,8 @@ export interface RenderMetrics {
   avgLine?: number;
   linkDen?: number;
   finalUrl?: string;
+  /** 目标站自己回的状态码；0 表示拿不到（如 about:blank） */
+  httpStatus?: number;
 }
 
 const SKELETON_MAX_CHARS = 5000;
@@ -850,6 +860,13 @@ const BINARY_SNIFF = /(\uFFFDPNG|\uFFFD\uFFFD|^PNG\u001a|^%PDF-)/;
  * 结果就是八档全试一遍（实测知乎 25.7s、贴吧 60.7s）后才给出毫无意义的失败。
  */
 const UPSTREAM_REFUSAL: Array<{ re: RegExp; cls: FailClass; label: string }> = [
+  // 余额不足必须排在 quota 前面：它说的是「账户没钱」而不是「这一轮打太快」，
+  // 归到 nocred 才会提示用户出手，归到 ratelimit 会让人以为等一会儿就好。
+  {
+    re: /insufficientbalance|insufficient balance|account balance not enough|please recharge|余额不足/i,
+    cls: "nocred",
+    label: "上游账户余额不足（key 欠费）",
+  },
   {
     re: /bad_endpoint|robots\.txt|KYC form/i,
     cls: "antibot",
@@ -1104,6 +1121,14 @@ async function viaPlaywright(url: string): Promise<Fetched | null> {
       throw new StageFail("network", `渲染超时：${err.slice(0, 80)}`);
     throw new StageFail("parse", `渲染失败：${err.slice(0, 80)}`);
   }
+  // 目标站自己回了 404/410：chromium 照样把错误页渲染出正文（实测 example.com 的
+  // 404 路径返回 917 字正常中文），不认状态码就等于把「页面不存在」当文章交付。
+  // 403 故意放行：Cloudflare 挑战页是 403 但正文有内容，交给 judge 判 antibot 更准。
+  const st = out.httpStatus ?? 0;
+  if (st === 404 || st === 410)
+    throw new StageFail("empty", `HTTP ${st}，页面不存在`);
+  if (st === 429 || st === 503)
+    throw new StageFail("ratelimit", `目标站限流（HTTP ${st}）`);
   // 渲染器会跟跳转走：被重定向到 passport./login. 这类域名就是明确的登录墙，
   // 比在正文里猜关键词可靠（京东的登录页正文里一个「请先登录」都没有）。
   if (out.finalUrl && out.finalUrl !== url) {
@@ -1208,22 +1233,32 @@ async function viaTinyfish(url: string): Promise<Fetched | null> {
 
 async function viaJina(url: string): Promise<Fetched | null> {
   const key = await loadKey("JINA_API_KEY");
-  const hdr = ["-H", "X-Return-Format: markdown"];
-  if (key) hdr.push("-H", `Authorization: Bearer ${key}`);
-  const { stdout } = await run(
-    "curl",
-    [
-      "-sL",
-      "--compressed",
-      "--max-time",
-      "25",
-      "-A",
-      UA,
-      ...hdr,
-      `https://r.jina.ai/${url}`,
-    ],
-    { maxBuffer: 8 << 20, timeout: 30_000 },
-  );
+  const call = async (withKey: boolean) => {
+    const hdr = ["-H", "X-Return-Format: markdown"];
+    if (withKey && key) hdr.push("-H", `Authorization: Bearer ${key}`);
+    const { stdout } = await run(
+      "curl",
+      [
+        "-sL",
+        "--compressed",
+        "--max-time",
+        "25",
+        "-A",
+        UA,
+        ...hdr,
+        `https://r.jina.ai/${url}`,
+      ],
+      { maxBuffer: 8 << 20, timeout: 30_000 },
+    );
+    return stdout;
+  };
+  let stdout = await call(Boolean(key));
+  // Jina 的 key 是预充值 token 包（不是无限免费额度），余额 0 时带 key 一律 402
+  // InsufficientBalanceError；而无 key 档按 IP 免费（20 RPM）照样能用。
+  // 所以欠费时去掉 key 重试一次，而不是把这条通道判死（实测无 key 抓 example.com 200）。
+  if (key && /insufficientbalance|insufficient balance|please recharge|40203/i.test(stdout.slice(0, 600))) {
+    stdout = await call(false);
+  }
   const text = stripInlineMedia(stdout).trim();
   if (/^(Missing API key|Unauthorized|Authentication required)/i.test(text)) {
     throw new StageFail("nocred", "Jina 拒绝：缺 key 或 key 失效");
@@ -1231,6 +1266,51 @@ async function viaJina(url: string): Promise<Fetched | null> {
   assertNotUpstreamError(text, "Jina Reader");
   judge(text, stdout, siteOf(url));
   return { via: "Jina Reader", text, chars: text.length };
+}
+
+async function viaMarkdownNew(url: string): Promise<Fetched | null> {
+  // markdown.new：免费、无 key，返回格式与 Jina 几乎一致（Title / URL Source / Markdown Content）。
+  // 价值在于 Jina 被限流或欠费时的等价备选，所以排在 Jina 之后。
+  const { stdout } = await run(
+    "curl",
+    ["-sL", "--compressed", "--max-time", "30", "-A", UA, `https://markdown.new/${url}`],
+    { maxBuffer: 8 << 20, timeout: 35_000 },
+  );
+  const text = stripInlineMedia(stdout).trim();
+  // 这个服务对抓不到的站会回一段自己的错误说明，不能当正文
+  if (!text || /^(Error|Failed|Unable to|Could not)/i.test(text))
+    throw new StageFail("empty", `markdown.new 未取到正文（${text.slice(0, 60) || "空响应"}）`);
+  assertNotUpstreamError(text, "markdown.new");
+  judge(text, stdout, siteOf(url));
+  return { via: "markdown.new", text, chars: text.length };
+}
+
+async function viaParallelFetch(url: string): Promise<Fetched | null> {
+  // Parallel 免费 MCP（无 key、无账号）：web_fetch 返回带 excerpts 的正文。
+  // 与 TinyFish 同为 hosted 服务，放在它后面作独立一路——两家索引不同，一方抽不出另一方可能行。
+  const args = JSON.stringify({ urls: [url], allow_live_fetch: true });
+  const { stdout } = await run("python3", [MCP_CALL, PARALLEL_MCP, "web_fetch", args], {
+    maxBuffer: 8 << 20,
+    timeout: 50_000,
+  });
+  const raw = stdout.trim();
+  if (raw.startsWith("MCP_ERROR"))
+    throw new StageFail("network", `Parallel MCP：${raw.slice(0, 120)}`);
+  // 返回是 { results: [{ url, title, excerpts: [...] }] }，把 excerpts 拼成正文
+  let parsed: { results?: Array<{ excerpts?: string[]; content?: string }> } = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new StageFail("parse", `Parallel 返回不是 JSON（${raw.slice(0, 60)}）`);
+  }
+  const first = parsed.results?.[0];
+  const text = stripInlineMedia(
+    (first?.content ?? (first?.excerpts ?? []).join("\n\n")).trim(),
+  ).trim();
+  if (!text) throw new StageFail("empty", "Parallel 未返回正文");
+  assertNotUpstreamError(text, "Parallel fetch");
+  judge(text, raw, siteOf(url));
+  return { via: "Parallel fetch", text, chars: text.length };
 }
 
 async function viaBrightdata(url: string): Promise<Fetched | null> {
@@ -1461,7 +1541,9 @@ async function fetchUrl(url: string, maxChars: number) {
     ["curl 直连", () => viaCurl(url)],
     ["Playwright 渲染", () => viaPlaywright(url)],
     ["TinyFish fetch", () => viaTinyfish(url)],
+    ["Parallel fetch", () => viaParallelFetch(url)],
     ["Jina Reader", () => viaJina(url)],
+    ["markdown.new", () => viaMarkdownNew(url)],
     ["BrightData", () => viaBrightdata(url)],
     ["archive.today", () => viaArchiveToday(url)],
   ];
@@ -1680,8 +1762,9 @@ const fetchTool = defineTool({
   name: "d_reach_fetch",
   label: "d-reach 抓网页",
   description:
-    "抓一个 URL 的正文，八档降级：微信直连（免费）→ cookie 注入（登录站）→ curl 直连 → " +
-    "Playwright 本地渲染（免费真 JS）→ TinyFish → Jina Reader → BrightData（消耗额度）→ archive.today 存档兜底。" +
+    "抓一个 URL 的正文，十档降级：微信直连（免费）→ cookie 注入（登录站）→ curl 直连 → " +
+    "Playwright 本地渲染（免费真 JS）→ TinyFish → Parallel fetch（免费无 key）→ Jina Reader → " +
+    "markdown.new（免费无 key）→ BrightData（消耗额度）→ archive.today 存档兜底。" +
     "返回 markdown/纯文本。除了网页，也直接支持：PDF（抽文字层，扫描件会明说需要 OCR）、" +
     "JSON 接口（格式化返回）、RSS/Atom 源（按条目展开标题+摘要）、纯文本。" +
     "自动处理 GBK/GB2312 等非 UTF-8 编码、iframe 内嵌正文、无 Content-Length 的流式响应。" +
@@ -1845,6 +1928,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
   pi.registerTool(fetchTool);
   pi.registerTool(quotaTool);
   pi.registerTool(socialTool);
+  pi.registerTool(decideTool);
 
   const runCommand = async (args: string, ctx: any, profile: Profile) => {
     const query = args.trim();
@@ -2087,6 +2171,146 @@ const socialTool = defineTool({
             text:
               `[${target.platform}] 搜索失败：${e instanceof Error ? e.message.slice(0, 200) : "未知"}。` +
               `\n如果是风控/限流，隔几分钟再试；登录态问题是另一类，先跑 d_reach_social 体检。`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+});
+
+// ---------------------------------------------------------------- 类型化判断
+// Parallel 的 web_decisions 不是搜索，是「拿网页证据给一个主题打类型化判断」：
+// 三种类型各有严格 schema（字段错一个就整轮 400），实测最小合法结构写在下面描述里。
+const DECIDE_SCHEMA_NOTE = `三种类型的最小合法结构（字段错一个整轮就报错）：
+- choice：criteria 必须是 ≥2 项的字典，key 是候选结论、value 是判据；返回成立的那个 key。
+- score：criteria 必须是 ≥2 项的数组，每项一条判据；返回 0..1 的 score 与 legend。
+- noul：criteria 必须是 {true, false} 两项；返回 noul 概率（越接近 1 越支持 true）。`;
+
+const decideTool = defineTool({
+  name: "d_reach_decide",
+  label: "d-reach 类型化判断",
+  description: `用网页证据对一个问题做类型化判断，带概率与引用（Parallel web_decisions，免费无 key、免注册）。
+不是搜索——要原始结果用 d_reach。这里适合「是否收费 / 该选哪个 / 是否属实」这类要落结论的问题。
+${DECIDE_SCHEMA_NOTE}
+例：判断某景区是否要门票 →
+state="杭州西湖景区门票"
+questions=[{name:"ticket", type:"choice", instructions:"是否需要买票进入",
+  criteria:{"免费":"景区本身不收费","收费":"进入需要门票"}}]`,
+  parameters: Type.Object({
+    state: Type.String({
+      description: "判断对象，自然语言即可（也可以写 JSON 字符串，会原样作为 topic）",
+    }),
+    questions: Type.Array(
+      Type.Object({
+        name: Type.String({ description: "答案回传用的键名" }),
+        type: Type.Union([
+          Type.Literal("choice"),
+          Type.Literal("score"),
+          Type.Literal("noul"),
+        ]),
+        instructions: Type.String({ description: "判断要求，一句话" }),
+        criteria: Type.Optional(
+          Type.Any({ description: "判据；choice=字典(≥2)、score=数组(≥2)、noul={true,false}" }),
+        ),
+        choices: Type.Optional(
+          Type.Array(Type.String(), { description: "可选的候选项清单（不参与判据）" }),
+        ),
+      }),
+      { description: "1–100 个类型化问题" },
+    ),
+  }),
+
+  async execute(_id, params) {
+    const questions: Record<string, unknown> = {};
+    for (const q of params.questions) {
+      const spec: Record<string, unknown> = {
+        type: q.type,
+        instructions: q.instructions,
+      };
+      if (q.criteria !== undefined) spec.criteria = q.criteria;
+      if (q.choices !== undefined) spec.choices = q.choices;
+      questions[q.name] = spec;
+    }
+
+    try {
+      const { stdout } = await run(
+        "python3",
+        [
+          MCP_CALL,
+          PARALLEL_MCP,
+          "web_decisions",
+          JSON.stringify({ state: { topic: params.state }, questions }),
+        ],
+        { maxBuffer: 8 << 20, timeout: 90_000 },
+      );
+      const raw = stdout.trim();
+      if (raw.startsWith("MCP_ERROR")) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `判断失败：${raw.slice(0, 400)}\n${DECIDE_SCHEMA_NOTE}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const d = JSON.parse(raw) as {
+        mode?: string;
+        answers?: Record<string, Record<string, unknown>>;
+        citations?: Array<{ url?: string; title?: string }>;
+        usage?: { input_tokens?: number };
+      };
+
+      const lines: string[] = [`## 判断：${params.state}`];
+      for (const [name, a] of Object.entries(d.answers ?? {})) {
+        const type = String(a.type ?? "");
+        if (type === "choice") {
+          const probs = Object.entries(
+            (a.probabilities ?? {}) as Record<string, number>,
+          )
+            .map(([k, v]) => `${k} ${(Number(v) * 100).toFixed(0)}%`)
+            .join(" / ");
+          const conf = Number(a.confidence ?? 0) * 100;
+          lines.push(
+            `- **${name}** → ${a.choice}（置信 ${conf.toFixed(0)}%${probs ? `；${probs}` : ""}）`,
+          );
+        } else if (type === "score") {
+          const legend = Object.entries(
+            (a.legend ?? {}) as Record<string, string>,
+          )
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" / ");
+          lines.push(
+            `- **${name}** → score ${Number(a.score ?? 0).toFixed(3)}${legend ? `（${legend}）` : ""}`,
+          );
+        } else {
+          const p = Number(a.noul ?? 0);
+          lines.push(`- **${name}** → ${p >= 0.5 ? "成立" : "不成立"}（noul ${p.toFixed(3)}）`);
+        }
+      }
+
+      const cites = (d.citations ?? []).filter((c) => c.url).slice(0, 8);
+      if (cites.length) {
+        lines.push("", "**依据**");
+        for (const c of cites) lines.push(`- [${c.title || c.url}](${c.url})`);
+      }
+      if (d.usage?.input_tokens)
+        lines.push("", `_输入 ${d.usage.input_tokens} tokens · Parallel 免费档_`);
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { state: params.state, answers: d.answers, citations: cites },
+      };
+    } catch (e) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `判断失败：${e instanceof Error ? e.message.slice(0, 300) : "未知"}。` +
+              `\n若是 schema 报错，先核对 criteria 形状：\n${DECIDE_SCHEMA_NOTE}`,
           },
         ],
         isError: true,

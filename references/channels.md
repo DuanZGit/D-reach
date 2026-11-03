@@ -52,6 +52,18 @@
 - **代价**：**2,500 次一次性赠送**（不是每月重置），之后 $1.00/1,000 次。已用 `quota.py` 记账。
 - **别用它做**：查 API 参数、查报错。
 
+### `tavily` Tavily keyless · 免费正文摘录
+- **擅长**：**无账号无 key**。结果不只给标题，`content` 是 1300–1500 字的正文摘录 —— 实测查「杭州西湖门票 2026」直接给出雷峰塔 40 元、三潭印月 20 元、城隍阁 30 元的价目明细，比 `serper` 的标题+两行 snippet 强一档。2.4s，中文 query 5/5 命中。
+- **不擅长**：按 IP 限速（官方称约 30 次/IP/小时），超额 429；结果条数上限 20。
+- **代价**：0（不记账）。带 `X-Tavily-Access-Mode: keyless` 头即可。
+- **别用它做**：高频批量抓取（会撞 IP 限额）。
+
+### `parallel` Parallel MCP · 免费搜索/抓取/判断
+- **擅长**：**无 key 无账号**的 MCP 服务（`https://mcp.parallel.ai/mcp`），三个工具：`web_search`（带 excerpts + `publish_date`）、`web_fetch`（正文抽取）、`web_decisions`（类型化判断）。实测搜索结果带整段正文和发布日期，对「最新/时效」类问题友好。
+- **不擅长**：需走 MCP 握手（脚本 `scripts/mcp_call.py` 已封装）；匿名限流；`web_decisions` 的 schema 挑剔（三种类型的 criteria 形状各不相同，错一个字段整轮 400）。
+- **代价**：0（不记账）。
+- **别用它做**：需要精确控制检索域的场景（它不接受 includeDomains 类参数）。
+
 ### `fcs` Firecrawl /search · 全文搜索
 - **擅长**：结果质量高 —— 实测同时命中 GitHub issue、官方文档、论文 PDF、Reddit 讨论。适合「要几篇靠谱长文」的场景。
 - **不擅长**：中文覆盖不如 `serper`；每条结果消耗 1 credit。
@@ -125,3 +137,23 @@
 1. 看问题本质属于上面哪一行，用 `channels` 指定；
 2. 实在判断不了，`profile=base`（9 路免费全铺）比 `deep`（13 路含限额）划算；
 3. 只有确认免费通道拿不到，才上 `bd`（`serper` 通常已经够，且快 5 倍）。
+
+## 五、已验证不可用（别再重复踩）
+
+2026-11-04 逐个实测过，这些「看起来免费」的通道**不能接**，记一笔免得以后重复调研：
+
+| 候选 | 实测结果 | 结论 |
+|---|---|---|
+| DuckDuckGo `html.duckduckgo.com/html/?q=` | 202 + 零结果 | 反爬拦截，无正文 |
+| DuckDuckGo Instant Answer API | 只回即时答案卡 | 不是网页搜索，拿不到结果列表 |
+| Semantic Scholar `graph/v1/paper/search` | 429 | 无 key 直接限流 |
+| grep.app `/api/search` | 429 | 共享出口 IP 被限流 |
+| Google Custom Search JSON API | 停新客 | 拿不到 key |
+| Bing Web Search API | 2025-08-11 退役 | 端点已下线 |
+| SerpApi | 250 次/月 + 无 CORS | 额度太小，不值一路 |
+| SearXNG 公共实例 | 不稳定 | 要自建才有意义 |
+| Brave Search API | 2026-02 起免费档要绑卡 | 有卡门槛，不接 |
+| Linkup | 需注册 key（送 4000 次，之后每月补 $20） | 暂不接，等现有免费路跑一阵 |
+
+已经接进来的等价免费路：`tavily`（正文摘录）、`parallel`（搜索/抓取/判断）、`wiki`、
+`serper`（一次性 2500 次）。找新通道前先看这张表，别把时间花在 429 和 202 上。
