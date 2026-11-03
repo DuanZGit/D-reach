@@ -171,10 +171,11 @@ f_gh() {     # GitHub 仓库搜索（免 key，10 次/分钟）
   # GitHub 只认英文且整句是 AND 匹配：「Home Assistant 3D floorplan dashboard card github」
   # 整句传过去 total_count=0。所以抽 ASCII 词、剔掉 github/the/for 这类噪声、取前 4 个。
   GQ=$(echo "$Q" | grep -oE '[A-Za-z0-9][A-Za-z0-9._+-]*' \
-       | grep -viE '^(github|repo|repository|the|a|an|of|for|and|to|in|on|with|how|what|best|3d|2d|ui|ux|api|app|web|ai|ml|ios|os)$' \
+       | grep -viE '^(github|repo|repository|the|a|an|of|for|and|to|in|on|with|how|what|best|ui|ux|api|app|web|ai|ml|ios|os)$' \
        | head -4 | tr '\n' ' ')
-  # 抽不出英文词不是失败（中文 query 很正常），写空结果算 0 命中，不累计连败
-  [ -z "$GQ" ] && { echo '{"items":[],"total_count":0}' > "$TMP/gh.json"; return; }
+  # 抽不出英文词不是失败（中文 query 很正常）——写 skip 而不是空结果，
+  # 否则每轮都会显示「GitHub：0 命中」并计入「1 路 0 命中」，看着像通道坏了。
+  [ -z "$GQ" ] && { echo "no-english" > "$TMP/skip.gh"; return; }
   curl -s --max-time 12 -G "https://api.github.com/search/repositories" \
     -H "Accept: application/vnd.github+json" \
     --data-urlencode "q=$GQ" --data-urlencode "sort=stars" \
@@ -217,14 +218,16 @@ f_bili() {   # B 站视频搜索（需登录态；冷却 90 秒）
   local left
   left=$(social_gate bili 90) || { echo "cooldown:$left" > "$TMP/skip.bili"; return; }
   # B 站搜索是多词 AND：「智能家居 值得买 评测」0 条、「智能家居」3 条。
-  # 所以先取前 2 词，0 命中再退到首词。
-  # shellcheck disable=SC2086
-  set -- $Q
-  BQ="${1:-} ${2:-}"
+  # 中文 query 没空格，`set -- $Q` 会切出「研究下」这种动词当首词，搜出来全是
+  # 无关视频（实测「研究下 家庭平面图 有什么好方案」→ 捞出「研究下政策力度」）。
+  # 所以先把口语前缀剥掉再截断。截断必须按字符不能用 cut -c（那是按字节，
+  # 中文会被切出半个字变成乱码）。
+  BQ=$(printf '%s' "$Q" | python3 -c "import sys,re; s=re.sub(r'^(研究下|研究一下|研究|看看|看一下|看下|帮我|帮忙|帮忙看|查一下|查下|搜一下|搜下|找一下|找下|请问|想知道|有没有|有什么|什么|怎么|如何|能不能)\\s*','',sys.stdin.read().strip()); print(s[:20] or s)")
   timeout 22 bilibili video search --keyword "$BQ" --num 6 --json > "$TMP/bili.json" 2>/dev/null \
     || { rm -f "$TMP/bili.json"; return; }
   case "$(python3 -c "import json;print(json.load(open('$TMP/bili.json')).get('result',{}).get('count',0))" 2>/dev/null)" in
-    0) timeout 15 bilibili video search --keyword "${1:-}" --num 6 --json > "$TMP/bili.json" 2>/dev/null \
+    0) BQ2=$(printf '%s' "$BQ" | python3 -c "import sys; print(sys.stdin.read().strip()[:8])")
+       timeout 15 bilibili video search --keyword "$BQ2" --num 6 --json > "$TMP/bili.json" 2>/dev/null \
          || rm -f "$TMP/bili.json" ;;
   esac
 }
@@ -1011,7 +1014,13 @@ def http_code(key):
     return t.strip() if t else None
 
 _default_n = sum(1 for _s in SECTIONS if not _s[4])
-_label = (f"deep 深调研档（{len(SECTIONS)} 路）" if DEEP == "1" else f"默认档（{_default_n} 路）")
+if ON:
+    # --on 时实际只跑点名的几路，头部不能写默认档的 19 路
+    _label = f"指定通道（{len([c for c in ON.split(',') if c])} 路）"
+elif DEEP == "1":
+    _label = f"deep 深调研档（{len(SECTIONS)} 路）"
+else:
+    _label = f"默认档（{_default_n} 路）"
 print(f"## fanout「{Q}」— {_label}\n")
 # ---------- 通道健康状态（跨轮记忆）----------
 HEALTH = pathlib.Path(os.environ.get("D_REACH_HEALTH") or os.path.expanduser("~/.agent-reach/channels.json"))
@@ -1134,12 +1143,17 @@ for key, name, note, fn, deep_only in SECTIONS:
         skipped.append(name); mark(key, "skip")
         continue
     if skip and skip.startswith("cooldown:"):
-        print(f"### 🔇 {name} —— {skip.split(':', 1)[1]} 分钟内刚搜过，本轮跳过"
+        print(f"### 🔇 {name} —— {skip.split(':', 1)[1]} 分钟内刚搜过"
               f"（这类通道连打会触发风控验证码，所以设了最小间隔）\n")
         skipped.append(name); mark(key, "skip")
         continue
+    if skip == "no-english":
+        # 插件侧会包一层「跳过（note）」，这里不要再写「本轮跳过」否则双重嵌套
+        print(f"### 🔇 {name} —— query 里没有英文关键词（GitHub 只认英文，中文搜不到）\n")
+        skipped.append(name); mark(key, "skip")
+        continue
     if skip == "captcha":
-        print(f"### 🔇 {name} —— 平台风控要验证码，本轮跳过（等几小时或换个词；不影响其余通道）\n")
+        print(f"### 🔇 {name} —— 平台风控要验证码（等几小时或换个词；不影响其余通道）\n")
         skipped.append(name); mark(key, "skip")
         continue
     if skip == "err":

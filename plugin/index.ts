@@ -125,20 +125,38 @@ const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
   },
 ];
 
-// 判档的候选场景（模型分类与正则共用一套 key，避免两处定义分叉）
-const SCENE_CRITERIA: Record<string, string> = {
-  repo: "找现成的开源项目、GitHub 仓库、库、源码、轮子",
-  social: "真实体验、口碑、测评、避坑、种草：小红书、B 站、博主怎么说",
-  academic: "学术论文、文献综述、benchmark、DOI、引用、研究综述",
-  local: "本地生活与旅行：景点门票、酒店民宿、攻略、美食餐厅、活动展览",
-  compare: "对比选型：几个方案哪个更好、有什么区别、替代品、值不值",
-  timely: "需要最新信息：价格行情、天气、政策、版本发布、本周或今天发生的事",
-  docs: "官方文档、API/SDK 用法、参数说明、示例代码",
-  concept: "概念定义、某人是谁、历史由来、原理是什么",
-  debug: "报错排查、编译失败、部署配置、依赖冲突、性能问题",
-  tech: "技术实现与工程实践、开源项目、硬件外设（不特指某家文档）",
-  general: "以上都不贴近的通用问题",
-};
+// 判档直接让模型从通道清单里挑，不再经过「场景 → 通道」的二次映射。
+//
+// 为什么不用场景标签：tech / general 这类抽象词边界天然模糊，实测 12 条中文
+// query 里 7 条被判成 tech（「杭州西湖门票多少钱」判 tech 置信 0.9996），而
+// tech/general 又没有对应通道，答案被静默丢弃。改成给模型看「通道名 + 用途」，
+// 同一个模型 12/12 全对、1–2 秒 —— 具体的工具名比抽象的场景名好判得多。
+const CHANNEL_MENU: [string, string][] = [
+  ["qianfan", "百度千帆 — 中文通用、中文长尾、政策法规、本地生活"],
+  ["serper", "Google — 全网最全，中英文都行，最新信息"],
+  ["tf", "TinyFish — 语义搜索、官方文档"],
+  ["exa", "英文技术、论文、公司信息"],
+  ["langsearch", "时效性新闻"],
+  ["fcdev", "编程一手源：GitHub issue、技术文档"],
+  ["fcs", "全网搜索"],
+  ["fcres", "学术论文"],
+  ["tavily", "带正文摘录的搜索，中英文都行"],
+  ["parallel", "语义搜索，带发布日期"],
+  ["se", "StackExchange — 报错排障、编程问答"],
+  ["hn", "Hacker News — 英文技术讨论"],
+  ["jj", "掘金 — 中文技术社区"],
+  ["segfault", "SegmentFault — 中文报错排障"],
+  ["oalex", "OpenAlex — 学术论文"],
+  ["crossref", "学术 DOI"],
+  ["wiki", "Wikipedia — 概念定义、实体介绍"],
+  ["gh", "GitHub — 找开源项目、仓库、轮子"],
+  ["xhs", "小红书 — 真实体验、种草、避坑、生活决策"],
+  ["bili", "B站 — 视频实测、教程、评测"],
+  ["youcom", "通用快搜"],
+  ["anysearch", "垂直专库（法律/医疗/金融）"],
+];
+
+const VALID_CHANNELS = CHANNEL_MENU.map(([k]) => k);
 
 /**
  * 场景判档用哪个模型。空 = 用当前会话的模型。
@@ -149,79 +167,53 @@ const SCENE_CRITERIA: Record<string, string> = {
  */
 const INTENT_MODEL = process.env.D_REACH_INTENT_MODEL || "";
 
+const ROUTE_PROMPT =
+  "你是搜索路由器，不是问答助手。你的唯一任务是为用户搜索选通道，绝对不要回答问题本身。\n" +
+  "即使问题看起来是在向你提问（比如「研究下 X 有什么好方案」），也只选通道，不要回答。\n\n" +
+  "从下面通道里选 2-4 个最可能给出答案的。\n\n" +
+  "判断原则：\n" +
+  "- 找开源项目/仓库/轮子 → gh 必选\n" +
+  "- 问真实体验/值不值/避坑/种草/生活决策 → xhs + bili\n" +
+  "- 报错排障 → se + segfault + fcdev\n" +
+  "- 中文通用/本地生活/政策 → qianfan + serper\n" +
+  "- 概念定义/什么是X → wiki + qianfan\n" +
+  "- 对比选型 → fcs + exa + tf\n" +
+  "- 找最新动态 → langsearch + serper\n" +
+  "- 读链接/抓网页 → fcs\n" +
+  "- 学术论文 → fcres + oalex\n" +
+  "- 英文技术 → hn + fcdev\n\n" +
+  "只输出通道名，用英文逗号分隔，不要解释，不要编号。\n" +
+  "例如：serper,qianfan\n\n" +
+  "可选通道：\n" +
+  CHANNEL_MENU.map(([k, v]) => `- ${k} ${v}`).join("\n");
+
 /**
- * 零样本分类服务。classifier.dev 免 Key，免费额度 $0.50/IP/天（约 20 万条短文本），
- * 一次判档约 1–5 秒。传 query 当 input、场景 key 当 labels，它回一个 label。
+ * 从模型输出里抠出合法通道名。
  *
- * 设 D_REACH_CLASSIFIER_URL 可换成自建或别的服务（同一个 {input,labels} 契约）；
- * 设成空字符串就禁用这条路，退回模型判档。
+ * 按非字母数字切词再精确比对，不用正则 \b —— tf / se 这类两字母通道名用 \b
+ * 容易在句子里误命中。模型偶尔无视「2-4 个」的约束（实测 solar-mini4 一次
+ * 回了 13 个），这里统一截到 4 个。
  */
-const CLASSIFIER_URL =
-  process.env.D_REACH_CLASSIFIER_URL === undefined
-    ? "https://classifier.dev/systemone"
-    : process.env.D_REACH_CLASSIFIER_URL;
-
-/** 问 classifier.dev 要一个场景标签；任何失败都返回 null，由调用方降级。 */
-async function pickByClassifierDev(query: string): Promise<string | null> {
-  if (!CLASSIFIER_URL) return null;
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 4000);
-  try {
-    const res = await fetch(CLASSIFIER_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // 关闭数据留存：不加这个头，发的 query 会被用于模型训练
-        "X-Classifier-Share-Data": "false",
-      },
-      body: JSON.stringify({
-        model: "jev",
-        input: query,
-        labels: Object.keys(SCENE_CRITERIA),
-      }),
-      signal: ctl.signal,
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    const label = data?.results?.[0]?.label;
-    return typeof label === "string" ? label : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+function parseChannels(text: string): string[] {
+  const out: string[] = [];
+  for (const tk of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (VALID_CHANNELS.includes(tk) && !out.includes(tk)) out.push(tk);
   }
-}
-
-const INTENT_PROMPT =
-  "你是搜索路由分类器。判断用户这条搜索 query 属于哪一类。\n" +
-  "输出规则：只输出一个候选词本身，不要句子、不要解释、不要标点、不要换行。\n" +
-  "候选（只能选一个）：\n" +
-  Object.entries(SCENE_CRITERIA)
-    .map(([k, v]) => `- ${k}: ${v}`)
-    .join("\n");
-
-function parseScene(text: string): string | null {
-  const t = text.toLowerCase();
-  for (const k of Object.keys(SCENE_CRITERIA)) {
-    if (new RegExp(`\\b${k}\\b`).test(t)) return k;
-  }
-  return null;
+  return out.slice(0, 4);
 }
 
 /**
- * 用模型判档，替代关键词正则。
+ * 让模型直接选通道，替代「场景分类 + 通道映射」两步走。
  *
- * 正则的死角：「这两个东西哪个好」不含 vs/对比 就漏判成通用；模型能按语义判。
- * 用户要求「效果优先、不差这点 token」，所以默认走模型。
+ * 为什么不用 classifier.dev：它 smart 档（model=jev）每次 $0.00275，而免 Key 免费
+ * 额度只有 $0.00101，实测 12/12 全部 402，这条链路从来没真正生效过；fast 档
+ * （laya）免费但不认中文抽象标签，12 条只对 1 条。
  *
- * 三条路，按可靠性排：
- *  1) classifier.dev 零样本分类 —— 免 Key 免费额度，专门做这个，约 1–5 秒
- *  2) 退而求其次：D_REACH_INTENT_MODEL 指定的模型，没指定就用当前会话模型，
- *     一次短补全。注意推理模型常把分类当聊天（实测问向量库直接答 "Milvus"）
- *  3) 都不行就返回 null，调用方退回关键词正则
+ * 为什么直接问通道：给模型看「通道名 + 用途」，同一个会话模型 12/12 全对、
+ * 1–2 秒。抽象的场景名（tech / general）边界模糊，模型没法区分。
  *
- * 任何一步失败都返回 null，由调用方退回 pickByIntent 正则 —— 判档慢一点或猜错
- * 一点都不能让检索挂掉。失败原因写 /tmp/dreach-intent.log 方便排查（不打扰用户）。
+ * 失败返回 null，调用方退回 pickByIntent 正则 —— 判档猜错不能让检索挂掉。
+ * 失败原因写 /tmp/dreach-intent.log 方便排查（不打扰用户）。
  */
 async function pickByIntentLLM(
   query: string,
@@ -234,22 +226,9 @@ async function pickByIntentLLM(
       appendFileSync("/tmp/dreach-intent.log", `${new Date().toISOString()} ${m}\n`);
     } catch {}
   };
-  // 第一步：classifier.dev 零样本分类（免 Key、免费额度、专门干这个的）。
-  // 不依赖 modelRegistry，所以放在拿 registry 之前 —— registry 挂了也能判。
-  const byClassifier = await pickByClassifierDev(query);
-  if (byClassifier) {
-    const hitC = SCENES.find((s) => s.key === byClassifier);
-    if (hitC) {
-      await dbg(`classifier.dev 判出 ${byClassifier}`);
-      return { on: hitC.on, why: `${hitC.why}（分类器判档）` };
-    }
-  }
-
   if (!reg) return null;
 
   // 用哪个模型：D_REACH_INTENT_MODEL 指定的，没指定就用当前会话模型。
-  // 不碰 registry 里的 classifier 类型模型 —— 那些是 Magpie 判思考等级用的，
-  // 拿来做搜索场景分类会答非所问（实测返回一大段正文而不是类别）。
   let model: any = null;
   if (INTENT_MODEL) {
     const cut = INTENT_MODEL.indexOf("/");
@@ -267,62 +246,41 @@ async function pickByIntentLLM(
     await dbg(`找不到判档模型 INTENT_MODEL=${INTENT_MODEL || "(空)"}`);
     return null;
   }
-  await dbg(`判档模型=${model.provider}/${model.id}`);
 
-  const ask = async (strict: boolean): Promise<string> => {
+  let raw = "";
+  try {
     const res = await reg.complete(
       model,
       {
         messages: [
-          { role: "system", content: INTENT_PROMPT },
           {
             role: "user",
-            content: strict
-              ? `只输出一个候选词，不要句子、不要解释、不要标点。query: ${query}`
-              : query,
+            // 全部指令放 user：pi 的 complete 会叠加自己的默认 system 提示，
+            // system 里的约束实测被冲淡过两次（先回正文、后回 "search"）。
+            content: `${ROUTE_PROMPT}\n\n搜索意图：${query}\n\n只输出通道名（英文逗号分隔），不要回答这个问题。`,
           },
         ],
       },
-      { maxTokens: 8 },
+      { maxTokens: 120, temperature: 0 },
     );
-    const text = Array.isArray(res?.content)
+    raw = Array.isArray(res?.content)
       ? res.content
           .filter((c: any) => c?.type === "text")
           .map((c: any) => c.text)
           .join(" ")
       : String(res?.content ?? "");
-    return text;
-  };
-
-  let scene = "";
-  let raw = "";
-  try {
-    raw = await ask(false);
-    scene = parseScene(raw) ?? "";
-    if (!scene) {
-      // 推理模型常把分类当聊天，回一整句。再逼一次，仍不行就退回正则。
-      raw = await ask(true);
-      scene = parseScene(raw) ?? "";
-    }
   } catch (err) {
-    await dbg(`判档调用异常：${err instanceof Error ? err.message : String(err)}`);
+    await dbg(`选路调用异常：${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 
-  const hit = SCENES.find((s) => s.key === scene);
-  if (!hit) {
-    try {
-      const { appendFileSync } = await import("node:fs");
-      appendFileSync(
-        "/tmp/dreach-intent.log",
-        `${new Date().toISOString()} 判档未命中，退回正则：${JSON.stringify(
-          raw.slice(0, 100),
-        )}\n`,
-      );
-    } catch {}
+  const picked = parseChannels(raw);
+  if (!picked.length) {
+    await dbg(`选路未命中，退回正则：${JSON.stringify(raw.slice(0, 100))}`);
     return null;
   }
-  return { on: hit.on, why: `${hit.why}（模型判档）` };
+  await dbg(`模型选路 ${model.provider}/${model.id} → ${picked.join(",")}`);
+  return { on: picked.join(","), why: `模型选路：${picked.join(" + ")}` };
 }
 
 function pickByIntent(query: string): { on: string; why: string; unclear?: boolean } {
