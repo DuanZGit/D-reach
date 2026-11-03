@@ -202,9 +202,9 @@ json.dump(d, open(f, "w"))
 PY
 }
 
-f_xhs() {    # 小红书（需登录态 cookie；冷却 10 分钟）
+f_xhs() {    # 小红书（需登录态 cookie；冷却 2 分钟）
   local left
-  left=$(social_gate xhs 600) || { echo "cooldown:$left" > "$TMP/skip.xhs"; return; }
+  left=$(social_gate xhs 120) || { echo "cooldown:$left" > "$TMP/skip.xhs"; return; }
   timeout 22 xhs search "$Q" --json > "$TMP/xhs.json" 2>/dev/null
   # 风控验证码不是通道坏了，别计入连败把通道判死。先判 captcha 再看退出码。
   if grep -q 'verification_required\|aptcha' "$TMP/xhs.json" 2>/dev/null; then
@@ -213,9 +213,9 @@ f_xhs() {    # 小红书（需登录态 cookie；冷却 10 分钟）
   [ -s "$TMP/xhs.json" ] || rm -f "$TMP/xhs.json"
 }
 
-f_bili() {   # B 站视频搜索（需登录态；冷却 5 分钟）
+f_bili() {   # B 站视频搜索（需登录态；冷却 90 秒）
   local left
-  left=$(social_gate bili 300) || { echo "cooldown:$left" > "$TMP/skip.bili"; return; }
+  left=$(social_gate bili 90) || { echo "cooldown:$left" > "$TMP/skip.bili"; return; }
   # B 站搜索是多词 AND：「智能家居 值得买 评测」0 条、「智能家居」3 条。
   # 所以先取前 2 词，0 命中再退到首词。
   # shellcheck disable=SC2086
@@ -452,10 +452,10 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
-  for fn in f_langsearch f_exa f_fcres f_bd f_xhs f_bili; do launch "$fn"; done
+  for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
 fi
 wait
 
@@ -908,8 +908,8 @@ SECTIONS = [
     ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
     ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
-    ("xhs",      "小红书（种草/体验/避坑）", "需登录态 cookie；冷却 10 分钟", r_xhs, True),
-    ("bili",     "B 站视频（实测/教程/评测）", "需登录态；冷却 5 分钟", r_bili, True),
+    ("xhs",      "小红书（种草/体验/避坑）", "需登录态 cookie；冷却 2 分钟", r_xhs, False),
+    ("bili",     "B 站视频（实测/教程/评测）", "需登录态；冷却 90 秒", r_bili, False),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
