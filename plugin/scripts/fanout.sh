@@ -1030,14 +1030,32 @@ for _blk in CHAN_OUT:
     _REAL_PRINT(_blk, end="")
 
 save_health(health)
-weak = [f"{k}({v.get('streak_fail', 0)} 连败)" for k, v in health.items()
-        if isinstance(v, dict) and v.get("streak_fail", 0) >= 3]
+def _left(v):
+    """挂起还剩几秒；None = 没挂起（含已到期）。"""
+    u = v.get("suspend_until")
+    if not u:
+        return None
+    try:
+        d = (datetime.fromisoformat(u) - datetime.now(timezone.utc)).total_seconds()
+        return int(d) if d > 0 else None
+    except Exception:
+        return None
+
+weak = []
+for k, v in health.items():
+    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+        continue
+    left = _left(v)
+    weak.append(
+        f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
+        else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
+    )
 print(f"---\n**汇总**：{okc} 路有结果，共 {total} 条来源"
       + (f"；{zero} 路 0 命中" if zero else "")
       + (f"；{len(failed)} 路失败（{ '、'.join(failed) }）" if failed else "")
       + (f"；{len(skipped)} 路跳过（{ '、'.join(skipped) }）" if skipped else "") + "。\n")
 if weak:
-    print(f"**通道健康**：{'、'.join(weak)} —— 下次默认跳过，可用 `--force` 强跑复检。\n")
+    print(f"**通道健康**：{'、'.join(weak)}。\n")
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")

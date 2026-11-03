@@ -122,45 +122,188 @@ const SCENE_CRITERIA: Record<string, string> = {
 };
 
 /**
- * 用分类器模型判档，替代关键词正则。
+ * 场景判档用哪个模型。空 = 用当前会话的模型。
  *
- * 正则的死角：「这两个东西哪个好」不含 vs/对比 就漏判成通用；
- * 模型能按语义判。用户要求「效果优先、不差这点 token」，所以默认走模型。
+ * 环境变量 D_REACH_INTENT_MODEL 写 "provider/model" 可指定一个更便宜的模型
+ * （比如本地小模型），省主模型额度。不设就走当前模型，谁都开箱能用 ——
+ * 装这个插件的人不一定有本机 magpie，不能假设某个模型存在。
+ */
+const INTENT_MODEL = process.env.D_REACH_INTENT_MODEL || "";
+
+/**
+ * 零样本分类服务。classifier.dev 免 Key，免费额度 $0.50/IP/天（约 20 万条短文本），
+ * 一次判档约 1–5 秒。传 query 当 input、场景 key 当 labels，它回一个 label。
  *
- * 任何一步失败（没有分类器模型 / 没凭证 / 调用报错）都返回 null，
- * 由调用方退回 pickByIntent 正则 —— 判档慢一点或猜错一点都不能让检索挂掉。
+ * 设 D_REACH_CLASSIFIER_URL 可换成自建或别的服务（同一个 {input,labels} 契约）；
+ * 设成空字符串就禁用这条路，退回模型判档。
+ */
+const CLASSIFIER_URL =
+  process.env.D_REACH_CLASSIFIER_URL === undefined
+    ? "https://classifier.dev/systemone"
+    : process.env.D_REACH_CLASSIFIER_URL;
+
+/** 问 classifier.dev 要一个场景标签；任何失败都返回 null，由调用方降级。 */
+async function pickByClassifierDev(query: string): Promise<string | null> {
+  if (!CLASSIFIER_URL) return null;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const res = await fetch(CLASSIFIER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // 关闭数据留存：不加这个头，发的 query 会被用于模型训练
+        "X-Classifier-Share-Data": "false",
+      },
+      body: JSON.stringify({
+        model: "jev",
+        input: query,
+        labels: Object.keys(SCENE_CRITERIA),
+      }),
+      signal: ctl.signal,
+    });
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    const label = data?.results?.[0]?.label;
+    return typeof label === "string" ? label : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const INTENT_PROMPT =
+  "你是搜索路由分类器。判断用户这条搜索 query 属于哪一类。\n" +
+  "输出规则：只输出一个候选词本身，不要句子、不要解释、不要标点、不要换行。\n" +
+  "候选（只能选一个）：\n" +
+  Object.entries(SCENE_CRITERIA)
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join("\n");
+
+function parseScene(text: string): string | null {
+  const t = text.toLowerCase();
+  for (const k of Object.keys(SCENE_CRITERIA)) {
+    if (new RegExp(`\\b${k}\\b`).test(t)) return k;
+  }
+  return null;
+}
+
+/**
+ * 用模型判档，替代关键词正则。
+ *
+ * 正则的死角：「这两个东西哪个好」不含 vs/对比 就漏判成通用；模型能按语义判。
+ * 用户要求「效果优先、不差这点 token」，所以默认走模型。
+ *
+ * 三条路，按可靠性排：
+ *  1) classifier.dev 零样本分类 —— 免 Key 免费额度，专门做这个，约 1–5 秒
+ *  2) 退而求其次：D_REACH_INTENT_MODEL 指定的模型，没指定就用当前会话模型，
+ *     一次短补全。注意推理模型常把分类当聊天（实测问向量库直接答 "Milvus"）
+ *  3) 都不行就返回 null，调用方退回关键词正则
+ *
+ * 任何一步失败都返回 null，由调用方退回 pickByIntent 正则 —— 判档慢一点或猜错
+ * 一点都不能让检索挂掉。失败原因写 /tmp/dreach-intent.log 方便排查（不打扰用户）。
  */
 async function pickByIntentLLM(
   query: string,
   ctx: unknown,
 ): Promise<{ on: string; why: string; unclear?: boolean } | null> {
-  try {
-    const reg = (ctx as { modelRegistry?: any })?.modelRegistry;
-    if (!reg?.classify) return null;
-    const models: any[] = reg.getModelsOfType?.("classifier") ?? [];
-    const model = models.find((m) => reg.hasConfiguredAuth?.(m));
-    if (!model) return null;
+  const reg = (ctx as { modelRegistry?: any })?.modelRegistry;
+  const dbg = async (m: string) => {
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync("/tmp/dreach-intent.log", `${new Date().toISOString()} ${m}\n`);
+    } catch {}
+  };
+  // 第一步：classifier.dev 零样本分类（免 Key、免费额度、专门干这个的）。
+  // 不依赖 modelRegistry，所以放在拿 registry 之前 —— registry 挂了也能判。
+  const byClassifier = await pickByClassifierDev(query);
+  if (byClassifier) {
+    const hitC = SCENES.find((s) => s.key === byClassifier);
+    if (hitC) {
+      await dbg(`classifier.dev 判出 ${byClassifier}`);
+      return { on: hitC.on, why: `${hitC.why}（分类器判档）` };
+    }
+  }
 
-    const res = await reg.classify(model, {
-      state: { query },
-      questions: {
-        scene: {
-          type: "choice",
-          instructions:
-            "判断这条搜索 query 属于哪一类，选最贴近的一类。判不准就选 general，不要硬猜。",
-          criteria: SCENE_CRITERIA,
-        },
-      },
-    });
-    const ans = res?.answers?.scene;
-    if (!ans || ans.type !== "choice") return null;
-    const hit = SCENES.find((s) => s.key === String(ans.choice));
-    if (!hit) return null; // tech / general 交给正则的兜底分支（它还有技术词表）
-    const pct = Math.round((ans.confidence ?? 0) * 100);
-    return { on: hit.on, why: `${hit.why}（模型判档 ${pct}%）` };
-  } catch {
+  if (!reg) return null;
+
+  // 用哪个模型：D_REACH_INTENT_MODEL 指定的，没指定就用当前会话模型。
+  // 不碰 registry 里的 classifier 类型模型 —— 那些是 Magpie 判思考等级用的，
+  // 拿来做搜索场景分类会答非所问（实测返回一大段正文而不是类别）。
+  let model: any = null;
+  if (INTENT_MODEL) {
+    const cut = INTENT_MODEL.indexOf("/");
+    const prov = cut < 0 ? INTENT_MODEL : INTENT_MODEL.slice(0, cut);
+    const mid = cut < 0 ? "" : INTENT_MODEL.slice(cut + 1);
+    model =
+      reg.find?.(prov, mid) ??
+      (reg.getAvailable?.() ?? []).find(
+        (m: any) => m?.provider === prov && String(m?.id ?? "") === mid,
+      );
+  } else {
+    model = (ctx as { model?: any })?.model;
+  }
+  if (!model) {
+    await dbg(`找不到判档模型 INTENT_MODEL=${INTENT_MODEL || "(空)"}`);
     return null;
   }
+  await dbg(`判档模型=${model.provider}/${model.id}`);
+
+  const ask = async (strict: boolean): Promise<string> => {
+    const res = await reg.complete(
+      model,
+      {
+        messages: [
+          { role: "system", content: INTENT_PROMPT },
+          {
+            role: "user",
+            content: strict
+              ? `只输出一个候选词，不要句子、不要解释、不要标点。query: ${query}`
+              : query,
+          },
+        ],
+      },
+      { maxTokens: 8 },
+    );
+    const text = Array.isArray(res?.content)
+      ? res.content
+          .filter((c: any) => c?.type === "text")
+          .map((c: any) => c.text)
+          .join(" ")
+      : String(res?.content ?? "");
+    return text;
+  };
+
+  let scene = "";
+  let raw = "";
+  try {
+    raw = await ask(false);
+    scene = parseScene(raw) ?? "";
+    if (!scene) {
+      // 推理模型常把分类当聊天，回一整句。再逼一次，仍不行就退回正则。
+      raw = await ask(true);
+      scene = parseScene(raw) ?? "";
+    }
+  } catch (err) {
+    await dbg(`判档调用异常：${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  const hit = SCENES.find((s) => s.key === scene);
+  if (!hit) {
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync(
+        "/tmp/dreach-intent.log",
+        `${new Date().toISOString()} 判档未命中，退回正则：${JSON.stringify(
+          raw.slice(0, 100),
+        )}\n`,
+      );
+    } catch {}
+    return null;
+  }
+  return { on: hit.on, why: `${hit.why}（模型判档）` };
 }
 
 function pickByIntent(query: string): { on: string; why: string; unclear?: boolean } {
@@ -748,7 +891,7 @@ function judge(
     );
   }
   // 微信安全验证页：17KB 只有 JS，没有 #js_content。
-  // 不单独认出来就会被当成普通「缺 marker」，八档全跑一遍（实测 37–43 秒），
+  // 不单独认出来就会被当成普通「缺 marker」，十档全跑一遍（实测 37–43 秒），
   // 而它是 IP 级限流，换通道只会加重。加 Referer / Accept-Language 实测也无效。
   if (/secitptpage\/verify|环境异常.{0,20}完成验证/i.test(rawHtml)) {
     throw new StageFail(
@@ -846,7 +989,7 @@ function unescapeEntities(s: string): string {
 /**
  * 结构化直链（JSON / XML / RSS / Atom / 纯文本）。
  * 它们根本不是网页：htmlToText 会把它们当标签剔个精光，`chars < 300` 又会把它们判成空壳。
- * 实测：一条 RSS 源和一个 JSON 接口在修前都是「八档全失败」，而它们真是一字不差的数据。
+ * 实测：一条 RSS 源和一个 JSON 接口在修前都是「十档全失败」，而它们真是一字不差的数据。
  */
 function asStructured(body: string, ctype: string): Fetched | null {
   const t = body.trim();
@@ -945,7 +1088,7 @@ const BINARY_SNIFF = /(\uFFFDPNG|\uFFFD\uFFFD|^PNG\u001a|^%PDF-)/;
 /**
  * 远程通道（TinyFish/Jina/BrightData/archive）的错误体不是「抓到了短正文」，
  * 而是「对方拒绝了」。不先认出来，它会被当成 300 字的空壳页，
- * 结果就是八档全试一遍（实测知乎 25.7s、贴吧 60.7s）后才给出毫无意义的失败。
+ * 结果就是十档全试一遍（实测知乎 25.7s、贴吧 60.7s）后才给出毫无意义的失败。
  */
 const UPSTREAM_REFUSAL: Array<{ re: RegExp; cls: FailClass; label: string }> = [
   // 余额不足必须排在 quota 前面：它说的是「账户没钱」而不是「这一轮打太快」，
@@ -1116,7 +1259,7 @@ async function viaCurl(url: string): Promise<Fetched | null> {
         throw new StageFail("parse", `PDF 解析失败：${parsed.err ?? "未知"}`);
       const text = String(parsed.text ?? "").trim();
       if (text.length < 200) {
-        // 扫描件没有文字层：换任何 HTTP 通道都是同一份字节，八档里剩下七档全是浪费
+        // 扫描件没有文字层：换任何 HTTP 通道都是同一份字节，十档里剩下九档全是浪费
         throw new StageFail(
           "parse",
           `PDF 没有文字层（${parsed.pages ?? "?"} 页，扫描件需 OCR，不在本工具范围）`,
@@ -1302,11 +1445,12 @@ async function viaTinyfish(url: string): Promise<Fetched | null> {
       };
       const first = inner.results?.[0];
       const errMsg = (inner.errors ?? []).map((e) => e.error ?? "").join(" ");
-      if (errMsg && !first?.text)
-        throw new StageFail(
-          "antibot",
-          `TinyFish 报告抓取失败：${errMsg.slice(0, 100)}`,
-        );
+      if (errMsg && !first?.text) {
+        const cls: FailClass = /not.?found|\b404\b|no.?page/i.test(errMsg)
+          ? "empty"
+          : "antibot";
+        throw new StageFail(cls, `TinyFish 报告抓取失败：${errMsg.slice(0, 100)}`);
+      }
       if (first?.text) text = first.text.trim();
     } catch (e) {
       if (e instanceof StageFail) throw e;
@@ -1677,6 +1821,22 @@ async function fetchUrl(url: string, maxChars: number) {
     ["archive.today", () => viaArchiveToday(url)],
   ];
   const skipped: Array<{ stage: string; cls: FailClass; detail: string }> = [];
+  /** 提前收工的四种终止条件共用同一份骨架，只传各自的标志位。 */
+  const bail = (extra: {
+    ratelimited?: string;
+    fatal?: string;
+    slow?: boolean;
+    notfound?: boolean;
+  } = {}) => ({
+    ok: false as const,
+    skipped,
+    needHuman: [] as Array<{ stage: string; cls: FailClass; detail: string }>,
+    ratelimited: undefined as string | undefined,
+    fatal: undefined as string | undefined,
+    slow: undefined as boolean | undefined,
+    notfound: undefined as boolean | undefined,
+    ...extra,
+  });
   for (const [stage, fn] of attempts) {
     try {
       const got = await fn();
@@ -1691,24 +1851,19 @@ async function fetchUrl(url: string, maxChars: number) {
         skipped.push({ stage, cls: e.cls, detail: e.detail });
         // 429/503 是对「我们这个 IP + 此刻这个节奏」的信号。换通道、换域名格式都没用，
         // 唯一正确答案是停下等。实测继续把 TinyFish/Jina/BrightData/archive 走完要 50s+。
-        if (e.cls === "ratelimit")
-          return {
-            ok: false as const,
-            skipped,
-            needHuman: [],
-            ratelimited: e.detail,
-            slow: undefined as boolean | undefined,
-          };
+        if (e.cls === "ratelimit") return bail({ ratelimited: e.detail });
         // 二进制直链：不是「这一档没成」，是这个 URL 根本不是网页，后面七档全是浪费
-        if (e.fatal === "binary")
-          return {
-            ok: false as const,
-            skipped,
-            needHuman: [],
-            ratelimited: undefined,
-            fatal: e.detail,
-            slow: undefined as boolean | undefined,
-          };
+        if (e.fatal === "binary") return bail({ fatal: e.detail });
+        // 页面不存在是确定性结果：换十档都是同一份 404（实测跑完 44s，只换来 6 条「页面不存在」）。
+        // 连续两档都报 404 就当定论，不再烧后面的限额通道。
+        if (
+          e.cls === "empty" &&
+          /页面不存在|404/i.test(e.detail) &&
+          skipped.filter(
+            (s) => s.cls === "empty" && /页面不存在|404/i.test(s.detail),
+          ).length >= 2
+        )
+          return bail({ notfound: true });
         // 自己直连和本地浏览器都超时：站点就是慢，不是封我们。
         // 继续把 TinyFish/Jina/BrightData/archive 走完要再等 30s 并烧额度，实测救不回来。
         if (
@@ -1718,13 +1873,7 @@ async function fetchUrl(url: string, maxChars: number) {
             (s) => s.cls === "network" && /超时|timed out/i.test(s.detail),
           ).length >= 1
         )
-          return {
-            ok: false as const,
-            skipped,
-            needHuman: [],
-            ratelimited: undefined,
-            slow: true,
-          };
+          return bail({ slow: true });
       } else {
         // execFile 抛的错（curl 超时 / HTTP2 stream error / DNS）：归 network，不归 parse。
         // 实测 BrightData 对同一 URL 时成时败，失败时 curl 退出码 92（HTTP/2 stream error），
@@ -1758,25 +1907,12 @@ async function fetchUrl(url: string, maxChars: number) {
             (s) => s.cls === "network" && /超时|timed out/i.test(s.detail),
           ).length >= 2
         )
-          return {
-            ok: false as const,
-            skipped,
-            needHuman: [],
-            ratelimited: undefined,
-            slow: true,
-          };
+          return bail({ slow: true });
       }
     }
   }
   const needHuman = skipped.filter((s) => NEEDS_HUMAN.includes(s.cls));
-  return {
-    ok: false as const,
-    skipped,
-    needHuman,
-    ratelimited: undefined as string | undefined,
-    fatal: undefined as string | undefined,
-    slow: undefined as boolean | undefined,
-  };
+  return { ...bail(), needHuman };
 }
 
 // ---------------------------------------------------------------- 工具
@@ -1849,7 +1985,8 @@ const searchTool = defineTool({
         "想自己指定就传 channels：qianfan 中文综述(非来源) / tf 全网 / " +
         "fcdev 官方文档 / se 报错 / hn 技术观点 / jj,segfault 中文技术(仅技术) / " +
         "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
-        "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / bd Google(最贵最慢)";
+        "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / " +
+        "tavily 全网正文摘录(免key) / parallel 语义(免key) / bd Google(最贵最慢)";
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
         (why ? ` · ${why}` : on ? ` · ${on}` : "") +
@@ -1925,7 +2062,9 @@ const fetchTool = defineTool({
       const lines = r.skipped
         .map((s) => `- ${s.stage}：${FAIL_LABEL[s.cls]} — ${s.detail}`)
         .join("\n");
-      const advice = r.ratelimited
+      const advice = r.notfound
+        ? "\n\n**页面不存在**：多个通道都返回 404，这个链接本身就没有内容，换通道也没用。检查下 URL 是不是拼错了。"
+        : r.ratelimited
         ? `\n\n**被限流，已停手**：${r.ratelimited}\n继续换通道或重试只会加重限流。等一会儿再试，或换一个出口 IP。`
         : r.fatal
           ? `\n\n**这个链接不是网页**：${r.fatal}。降级档对它没有意义，不再尝试。`
@@ -1939,7 +2078,7 @@ const fetchTool = defineTool({
         content: [
           {
             type: "text",
-            text: `${r.ratelimited ? "被限流" : r.fatal ? "不是网页正文" : r.slow ? "站点太慢" : "八档都没拿到正文"}（${secs}s）：\n${lines || "- 无适用档位"}${advice}`,
+            text: `${r.notfound ? "页面不存在（404）" : r.ratelimited ? "被限流" : r.fatal ? "不是网页正文" : r.slow ? "站点太慢" : "十档都没拿到正文"}（${secs}s）：\n${lines || "- 无适用档位"}${advice}`,
           },
         ],
         details: {
