@@ -300,9 +300,28 @@ try:
     d=json.load(sys.stdin); print(d[1][0] if d[1] else "")
 except Exception: print("")' 2>/dev/null
   }
+  # 多词 query（「杭州 西湖 门票」）opensearch 常返空；再用 list=search 兜底取首条标题。
+  # 两轮都空说明维基确实没有对应条目 —— 此时记 0 命中，不能留 404（会被误判成通道故障）。
+  ls_search() {
+    curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" -G \
+      "https://zh.wikipedia.org/w/api.php" \
+      --data-urlencode "action=query" --data-urlencode "list=search" \
+      --data-urlencode "srsearch=$1" --data-urlencode "srlimit=1" \
+      --data-urlencode "format=json" \
+      | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); s=(d.get("query") or {}).get("search") or []; print(s[0]["title"] if s else "")
+except Exception: print("")' 2>/dev/null
+  }
   TITLE=$(os_search "$Q")
   [ -z "$TITLE" ] && TITLE=$(os_search "$BASEQ")
-  [ -z "$TITLE" ] && TITLE="$BASEQ"
+  [ -z "$TITLE" ] && TITLE=$(ls_search "$BASEQ")
+  [ -z "$TITLE" ] && TITLE=$(ls_search "$Q")
+  if [ -z "$TITLE" ]; then
+    printf '{"type":"none"}' > "$TMP/wiki.json"
+    printf '200' > "$TMP/wiki.http"
+    return 0
+  fi
   # REST summary 端点自己会跟随繁简重定向（/w/api.php?redirects=1 对中文维基的繁简重定向不生效，
   # 「紫砂壶」会拿到「簡繁重定向」那段说明文字而不是正文）
   ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].replace(" ","_")))' "$TITLE" 2>/dev/null)
@@ -665,6 +684,8 @@ def r_wiki():
     d = load_json("wiki.json")
     if d is None:
         return None
+    if d.get("type") == "none":
+        return []                                  # 无对应条目 = 0 命中，不是通道故障
     if d.get("type") == "disambiguation" or d.get("title") is None:
         return ("ERR", "维基百科没有这个条目（或只有消歧义页）")
     title = d.get("title") or ""
