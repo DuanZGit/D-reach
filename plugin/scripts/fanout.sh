@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres bd serper fcs wiki tavily parallel gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -432,7 +432,8 @@ except Exception: print("")' 2>/dev/null
   curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" "https://zh.wikipedia.org/api/rest_v1/page/summary/$ENC" \
     -o "$TMP/wiki.json" -w '%{http_code}' > "$TMP/wiki.http" 2>/dev/null
 }
-f_bd() {
+f_bd() {  # ⚠️ 已从档位移除（2026-11-04）：Google 搜索实测 31.4s，超过 25s 硬超时必然失败；
+           # Serper 已覆盖同一需求且快 17 倍。要恢复：加回 467 行 deep 循环 + 恢复 SECTIONS 条目。
   gate brightdata || return 0
   # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
   # ⚠️ 超时压到 25s：c2 实测 5 次调用 1×400(漏format)/1×500/2×50s 超时，而它是 deep 里最不
@@ -464,7 +465,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
 for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
-  for fn in f_langsearch f_exa f_fcres f_bd; do launch "$fn"; done
+  for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
 fi
 wait
 
@@ -922,7 +923,6 @@ SECTIONS = [
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
-    ("bd",       "BrightData Google（全网覆盖）", "已 quota.py use", r_bd, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
 SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
@@ -1187,7 +1187,7 @@ if weak:
     print(f"**通道健康**：{'、'.join(weak)}。\n")
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
-      "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research / BrightData）。")
+      "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research）。")
 
 # ---------- 历史记录 ----------
 # 网关和插件都靠它显示「最近查了什么、谁发起的、哪几路给了结果」。

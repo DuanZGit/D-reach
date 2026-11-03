@@ -2,7 +2,7 @@
 name: d-reach
 description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
-  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、BrightData、Firecrawl、
+  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
   **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 17 路（~5s）；
   L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
@@ -65,7 +65,7 @@ upstream:
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
    L2 起一律走它：**默认档 17 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
-   Firecrawl-Research / BrightData-Google（约 10-15s）。**别一条一条串行试** ——
+   Firecrawl-Research（约 10-15s）。**别一条一条串行试** ——
    实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
    L1 点查可只跑两路互证：`fanout.sh "<query>" --on hn,<最相关一路>`
    想知道单路返回什么/排查某通道时，用 `--on <通道名>` 隔离测试（通道名见 fanout.sh 头注释）
@@ -123,7 +123,7 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSe
 **免费优先**：`fanout.sh` 默认档一次并发 **17 路**（Firecrawl Developer /
 StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆 / TinyFish / Serper /
 tavily / parallel / Wikipedia / Firecrawl-search）—— 它们不限量、不记账，
-**闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research / BrightData 是限额/计 token 通道，
+**闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research 是限额/计 token 通道，
 **L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
 
 ## 收尾自查（交付前逐条过）
@@ -134,7 +134,7 @@ tavily / parallel / Wikipedia / Firecrawl-search）—— 它们不限量、不�
 - [ ] 查询改写做了 **≥5 种**吗？（原词/同义/英文/限域/时效，外加一条反方问法）
 - [ ] 追深轮做了吗？首轮冒出的人名/机构/版本/术语**回灌**了吗？
 - [ ] L3：反方来源找到了吗？找不到也要如实说「未发现反例」，不能假装没有
-- [ ] L3：`fanout.sh --deep` 铺了吗？（LangSearch / Exa / FC-Research / BrightData 月余量 >96%，不必省）
+- [ ] L3：`fanout.sh --deep` 铺了吗？（LangSearch / Exa / FC-Research 月余量 >96%，不必省）
 - [ ] ❌/⚠️ 的路注明原因了吗？（别把「请求失败」写成「搜不到」——那会把工程问题伪装成事实结论）
 - [ ] 有没有把「搜不到」当成「不存在」？要说明试过哪些通道
 
@@ -188,7 +188,7 @@ URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段�
 
 ```bash
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：17 路并发（~5s，13 路免 key）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/BrightData（~22s，21 路）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research（~20s，20 路）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --force       # 忽略健康状态强跑（复检用）
