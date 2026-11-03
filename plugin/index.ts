@@ -1316,10 +1316,13 @@ async function viaParallelFetch(url: string): Promise<Fetched | null> {
 async function viaBrightdata(url: string): Promise<Fetched | null> {
   const key = await loadKey("BRIGHTDATA_APITOKEN");
   if (!key) return null;
+  // 必须用 format:"json"：raw+data_format:"markdown" 会把真实状态码覆盖成 200。
+  // 实测 example.com/definitely-404-page —— json 档回 status_code:404，markdown 档回 200
+  // 且 body 是站点根页正文，于是 404 页被当成功收下（2026-11-04 实测）。
+  // 代价是 body 为原始 HTML，需要本地 htmlToText 转换。
   const body = JSON.stringify({
     zone: process.env.BRIGHTDATA_ZONE || "mcp_unlocker",
-    format: "raw",
-    data_format: "markdown",
+    format: "json",
     url,
   });
   const { stdout } = await run(
@@ -1348,14 +1351,52 @@ async function viaBrightdata(url: string): Promise<Fetched | null> {
       "empty",
       "BrightData 返回空响应（可能是这条通道对这个站不可用）",
     );
-  const text = stripInlineMedia(raw).trim();
-  if (text.startsWith("{")) {
+  // format:"json" 的响应是 {status_code, headers, body}；错误体同样是 JSON 但没有 status_code
+  let payload: {
+    status_code?: number;
+    body?: string;
+    headers?: Record<string, string>;
+  } | null = null;
+  if (raw.startsWith("{")) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = null;
+    }
+  }
+  if (!payload || typeof payload.status_code !== "number") {
     // 官方错误体：kyc 未通过 / bad_endpoint / 额度用尽
-    const cls: FailClass = /kyc|unauthor|token|quota|limit/i.test(text)
+    const err = stripInlineMedia(raw).trim();
+    const cls: FailClass = /kyc|unauthor|token|quota|limit/i.test(err)
       ? "nocred"
       : "antibot";
-    throw new StageFail(cls, `BrightData 拒绝：${text.slice(0, 80)}`);
+    throw new StageFail(cls, `BrightData 拒绝：${err.slice(0, 80)}`);
   }
+
+  // 真实状态码：这一档是唯一能拿到「目标页本身」状态的通道，判定要和 curl 档一致
+  const st = payload.status_code;
+  if (st === 429 || st === 503)
+    throw new StageFail(
+      "ratelimit",
+      `HTTP ${st}（BrightData 回传的真实状态码，继续换通道只会加重限流）`,
+    );
+  if (st === 404 || st === 410)
+    throw new StageFail("empty", `HTTP ${st}，页面不存在`);
+  if (st >= 400) throw new StageFail("network", `HTTP ${st}`);
+
+  const ctype = String(payload.headers?.["content-type"] ?? "").toLowerCase();
+  const rawBody = payload.body ?? "";
+  if (!rawBody) throw new StageFail("empty", "BrightData 回传的 body 为空");
+  if (rawBody.length > 4 << 20)
+    throw new StageFail(
+      "parse",
+      `响应 ${Math.round(rawBody.length / 1048576)}MB，太大不解析`,
+    );
+
+  const text = stripInlineMedia(
+    /html/.test(ctype) ? htmlToText(rawBody) : rawBody,
+  ).trim();
+  if (!text) throw new StageFail("empty", "BrightData 回传的内容抽不出正文");
   assertNotUpstreamError(text, "BrightData");
   if (BINARY_SNIFF.test(text)) {
     throw new StageFail(
@@ -1364,7 +1405,7 @@ async function viaBrightdata(url: string): Promise<Fetched | null> {
       "binary",
     );
   }
-  judge(text, stdout, siteOf(url));
+  judge(text, rawBody, siteOf(url));
   return { via: "BrightData", text, chars: text.length };
 }
 
