@@ -72,7 +72,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -376,6 +376,35 @@ f_parallel() {   # Parallel 免费 MCP（web_search）：无 key 无账号，结
     : > "$TMP/parallel.json"
   fi
 }
+f_youcom() {   # You.com 免 key MCP（you-search）：100 次/天，官方称 p50 0.4s
+  # 官方定价页明确「No API key, no account, no credit card」，走 ?profile=free 档。
+  # 注意：该网关会 403 掉 Python-urllib 默认 UA，mcp_call.py 里已固定 d-reach/1.0。
+  python3 "$DIR/mcp_call.py" "https://api.you.com/mcp?profile=free" you-search \
+    "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":6}))' "$Q")" \
+    > "$TMP/youcom.json" 2>/dev/null
+  if [ "$(head -c 11 "$TMP/youcom.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
+    head -c 300 "$TMP/youcom.json" > "$TMP/skip.youcom"
+    : > "$TMP/youcom.json"
+  fi
+}
+f_anysearch() {   # AnySearch：1000 次/天免费，20+ 垂直领域（法律/医疗/金融专库）
+  # 带 key 与匿名共享同一个 daily free quota，但带 key 不按 IP 算 —— 共享出口 IP 更稳。
+  # zone 按 query 语言自动切 cn / intl。
+  _ask=$(sh "$DIR/load_key.sh" ANYSEARCH_API_KEY https://anysearch.com 2>/dev/null) || _ask=""
+  _abody=$(python3 -c 'import json,re,sys
+q=sys.argv[1]
+z="cn" if re.search(r"[\u4e00-\u9fff]", q) else "intl"
+print(json.dumps({"query":q,"max_results":6,"zone":z}))' "$Q")
+  if [ -n "$_ask" ]; then
+    curl -s --max-time 22 -X POST "https://api.anysearch.com/v1/search" \
+      -H "Authorization: Bearer $_ask" -H 'Content-Type: application/json' \
+      -d "$_abody" -o "$TMP/anysearch.json" -w '%{http_code}' > "$TMP/anysearch.http" 2>/dev/null
+  else
+    curl -s --max-time 22 -X POST "https://api.anysearch.com/v1/search" \
+      -H 'Content-Type: application/json' \
+      -d "$_abody" -o "$TMP/anysearch.json" -w '%{http_code}' > "$TMP/anysearch.http" 2>/dev/null
+  fi
+}
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
@@ -462,7 +491,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_xhs f_bili; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
@@ -847,6 +876,46 @@ def r_serper():
     return rowify([(x.get("title", ""), x.get("link", ""),
                     trunc(x.get("snippet") or "", 100)) for x in rows])
 
+def r_youcom():
+    d = load_json("youcom.json")
+    if d is None:
+        return None
+    web = (d.get("results") or {}).get("web") if isinstance(d.get("results"), dict) else None
+    if not isinstance(web, list):
+        return rowify(walk_generic(d))
+    rows = []
+    for it in web:
+        hl = ((it.get("contents") or {}).get("highlights") or [])
+        snip = trunc(str(hl[0]), 120) if hl else trunc(it.get("description") or "", 120)
+        # page_age 对「最新/时效」类问题有用
+        if it.get("page_age"):
+            snip = f"[{str(it['page_age'])[:10]}] {snip}"
+        rows.append((it.get("title", ""), it.get("url", ""), snip))
+    return rowify(rows)
+
+def r_anysearch():
+    d = load_json("anysearch.json")
+    if d is None:
+        return None
+    # 成功是 code==0；402 是额度耗尽，403 是 key 过期
+    if d.get("code") not in (0, None):
+        return ("ERR", trunc(str(d.get("message") or "code != 0"), 200))
+    items = (d.get("data") or {}).get("results") if isinstance(d.get("data"), dict) else None
+    if not isinstance(items, list):
+        return rowify(walk_generic(d))
+    # 实测 snippet 常是站点侧栏推荐语（与 query 无关），content 才是正文 —— 优先 content。
+    rows = []
+    for it in items:
+        body = it.get("content") or ""
+        # content 是一整行压平的 markdown（"# 标题 # 站点名 > 栏目 ..."），
+        # 按 # 切开取第一段够长的实义文字，否则摘要会全是标题和面包屑
+        if body:
+            parts = [x.strip() for x in re.split(r"#+", body) if len(x.strip()) > 20]
+            body = parts[0] if parts else body.strip()
+        rows.append((it.get("title", ""), it.get("url", ""),
+                     trunc(body or it.get("snippet") or "", 120)))
+    return rowify(rows)
+
 def r_fcs():
     d = load_json("fcs.json")
     if d is None:
@@ -916,6 +985,8 @@ SECTIONS = [
     ("serper",  "Serper Google（本地生活/电商最强）", "2,500 次一次性赠送，已 quota.py use", r_serper, False),
     ("tavily",  "Tavily keyless（无账号，正文摘录）", "免费无 key；约 30 次/IP 后 429，不记账", r_tavily, False),
     ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
+    ("youcom",   "You.com 免 key MCP（100 次/天，0.4s）", "免 key 无账号；每天 100 次", r_youcom, False),
+    ("anysearch","AnySearch（1000 次/天，20+ 垂直域）", "带 key 额度不按 IP；每天 1000 次", r_anysearch, False),
     ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
     ("xhs",      "小红书（种草/体验/避坑）", "需登录态 cookie；冷却 2 分钟", r_xhs, False),
@@ -1003,7 +1074,7 @@ MERGE_ROWS = []     # (key, name, title, url, snippet, rank)
 CH_W = {            # 通道权重：直接给正文的源比只给标题的高
     "serper": 1.0, "tavily": 1.0, "fcs": 1.0, "fcdev": 1.0, "tf": 1.0,
     "exa": 1.0, "qianfan": 1.0, "fcres": 1.0,
-    "langsearch": 0.9, "parallel": 0.9,
+    "langsearch": 0.9, "parallel": 0.9, "youcom": 0.9, "anysearch": 1.0,
     "oalex": 0.8, "crossref": 0.8, "se": 0.8,
     "hn": 0.7, "bd": 0.7,
     "jj": 0.6, "wiki": 0.6, "segfault": 0.6,

@@ -2009,7 +2009,8 @@ const searchTool = defineTool({
         "fcdev 官方文档 / se 报错 / hn 技术观点 / jj,segfault 中文技术(仅技术) / " +
         "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
         "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / " +
-        "tavily 全网正文摘录(免key) / parallel 语义(免key) / bd Google(最贵最慢)";
+        "tavily 全网正文摘录(免key) / parallel 语义(免key) / youcom 快搜(免key) / " +
+        "anysearch 垂直专库 / gh GitHub 仓库 / xhs 小红书 / bili B站";
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
         (why ? ` · ${why}` : on ? ` · ${on}` : "") +

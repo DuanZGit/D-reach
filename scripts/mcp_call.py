@@ -27,6 +27,8 @@ def _post(endpoint: str, body: dict, session: str | None) -> tuple[str, str | No
     req.add_header("Content-Type", "application/json")
     # 不声明 text/event-stream 时部分服务端只回 JSON，声明后回 SSE —— 两种都吃
     req.add_header("Accept", "application/json, text/event-stream")
+    # 有些 MCP 网关（You.com）会 403 掉 Python-urllib 的默认 UA
+    req.add_header("User-Agent", "d-reach/1.0")
     req.add_header("MCP-Protocol-Version", PROTO)
     if session:
         req.add_header("Mcp-Session-Id", session)

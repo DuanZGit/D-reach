@@ -4,7 +4,7 @@ description: >
   统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
   GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
-  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 17 路（~5s）；
+  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 19 路（~5s）；
   L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
@@ -43,7 +43,7 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：21 条路里 17 路走默认档（13 路免 key：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / gh / xhs / bili，后两者需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、4 路限额通道月余量 >96%
+> 理由很直白：21 条路里 19 路走默认档（15 路免 key：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh / xhs / bili，后两者需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、4 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 >
@@ -64,7 +64,7 @@ upstream:
    - 已经有人存过公开存档（`archive.ph`）
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
-   L2 起一律走它：**默认档 17 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
+   L2 起一律走它：**默认档 19 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
    Firecrawl-Research（约 10-15s）。**别一条一条串行试** ——
    实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
    L1 点查可只跑两路互证：`fanout.sh "<query>" --on hn,<最相关一路>`
@@ -120,7 +120,7 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSe
 术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
 再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
 
-**免费优先**：`fanout.sh` 默认档一次并发 **17 路**（Firecrawl Developer /
+**免费优先**：`fanout.sh` 默认档一次并发 **19 路**（Firecrawl Developer /
 StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / 千帆 / TinyFish / Serper /
 tavily / parallel / Wikipedia / Firecrawl-search）—— 它们不限量、不记账，
 **闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research 是限额/计 token 通道，
@@ -187,8 +187,8 @@ URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段�
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：17 路并发（~5s，13 路免 key）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research（~20s，20 路）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：19 路并发（~5s，15 路免 key）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research（~20s，22 路）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --force       # 忽略健康状态强跑（复检用）

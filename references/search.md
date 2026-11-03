@@ -14,7 +14,7 @@
 > 本节保留是因为它解释**每一轮在干嘛**——fanout 只把「铺开」这一个动作自动化了。
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：17 路并发（~5s）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：19 路并发（~5s）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep    # L3：+LangSearch/Exa/FC-Research/BrightData
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing   # L1：单路点查，再配一手源
 ```
@@ -31,17 +31,17 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 
 | 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 17 路） |
+| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 19 路） |
 | 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补反向体验 | Jina 读官方文档原文；`<候选> vs`、`<候选> 问题`、`<候选> 替代` |
 
 只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 默认档
-默认档 17 路里 13 路免 key，`--deep` 的 4 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
+默认档 19 路里 15 路免 key，`--deep` 的 3 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
 
 **L3 深调研**（10 来源 / 3 轮 / 必含反证）
 
 | 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 1 广撒 | 中英文 + 学术 + 编程一手源 + 全网覆盖一次全铺 | `fanout.sh "<query>" --deep`（20 路） |
+| 1 广撒 | 中英文 + 学术 + 编程一手源 + 全网覆盖一次全铺 | `fanout.sh "<query>" --deep`（22 路） |
 | 2 追深 | 把首轮捞到的人名/机构/版本/术语回灌成新查询 | `fanout.sh "<回灌词> 原理/对比/评测" --deep` |
 | 3 反证 | `<主题> 缺点/失败/不推荐/争议/vs 替代` | `fanout.sh "<主题> 缺点 不推荐" --deep`；反证轮**不并入**前两轮计数 |
 

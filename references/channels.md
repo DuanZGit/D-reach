@@ -83,6 +83,18 @@
 - **代价**：0（不记账）。
 - **别用它做**：需要精确控制检索域的场景（它不接受 includeDomains 类参数）。
 
+### `youcom` You.com 免 key MCP · 快搜
+- **擅长**：官方定价页明写「No API key, no account, no credit card」，走 `https://api.you.com/mcp?profile=free` 的 `you-search`。官方称 p50 0.4s（实测 2.2s），结果带 `page_age` 日期和 `contents.highlights` 整段摘录，中文实测质量高（门票类问题直接给出各景点票价）。
+- **不擅长**：免费档每天 100 次；该网关会 **403 掉 `Python-urllib` 默认 UA**（`scripts/mcp_call.py` 里已固定 `d-reach/1.0`）。
+- **代价**：0（不记账）。要超过 100 次/天得上 key，Standard $5/1k。
+- **别用它做**：一天超过 100 次的批量检索。
+
+### `anysearch` AnySearch · 垂直专库
+- **擅长**：每天 1000 次免费（10 QPS），20+ 垂直领域（法律、医疗、金融等专库）—— 这是现有通道没有的角度。返回的 `content` 字段是整篇清理后的正文。
+- **不擅长**：**通用 query 质量一般** —— 实测中文泛搜会捞回站点旧文（2020 年的页面），摘要里还混着站点面包屑；`snippet` 字段常是侧栏推荐语，所以解析器优先取 `content`。
+- **代价**：带 key 与匿名**共享同一个 daily free quota**，带 key 只是让额度不按 IP 算（共享出口 IP 更稳）。Pro $3-5/1000 次。
+- **别用它做**：当通用搜索主力（中文用 `youcom` / `serper` / `tf`，英文用 `exa`）；它的价值在垂直专库。
+
 ### `fcs` Firecrawl /search · 全文搜索
 - **擅长**：结果质量高 —— 实测同时命中 GitHub issue、官方文档、论文 PDF、Reddit 讨论。适合「要几篇靠谱长文」的场景。
 - **不擅长**：中文覆盖不如 `serper`；每条结果消耗 1 credit。
@@ -154,7 +166,7 @@
 工具输出开头会写「**未命中已知场景**」，并列出通道菜单。这时：
 
 1. 看问题本质属于上面哪一行，用 `channels` 指定；
-2. 实在判断不了，`profile=base`（17 路，13 路免 key）比 `deep`（20 路含限额）划算；
+2. 实在判断不了，`profile=base`（19 路，15 路免 key）比 `deep`（22 路含限额）划算；
 3. 只有确认免费通道拿不到，才上 `bd`（`serper` 通常已经够，且快 5 倍）。
 
 ## 五、已验证不可用（别再重复踩）
