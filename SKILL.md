@@ -5,7 +5,7 @@ description: >
   GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、Firecrawl、
   Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
   **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 19 路（~5s）；
-  L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+4 路限额通道，脚本自动记账）。
+  L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+3 路限额通道，脚本自动记账）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
   想读一篇文章或链接（读一下/打开这个/看看链接）、想查社交平台内容（小红书/B站/微博/推特/Reddit）、
@@ -43,7 +43,7 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：21 条路里 19 路走默认档（15 路免 key：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh / xhs / bili，后两者需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、4 路限额通道月余量 >96%
+> 理由很直白：22 条路里 19 路走默认档（其中 12 路**完全免 key**：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh；xhs / bili 需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、3 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 >
@@ -187,7 +187,7 @@ URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段�
 ## 铺开器 fanout.sh（L2 起必用）
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：19 路并发（~5s，15 路免 key）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：19 路并发（~5s，12 路完全免 key）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research（~20s，22 路）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）

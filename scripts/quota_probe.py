@@ -137,7 +137,6 @@ def unimplemented(reason):
 PROBES = {
     "firecrawl": probe_firecrawl,
     "tinyfish": probe_tinyfish,
-    "brightdata": probe_brightdata,
     "exa": lambda: unimplemented("官方 usage 接口需向 support 申请 access，默认不可用"),
     "jina_reader": lambda: unimplemented("只有 dashboard 看余额，没有公开额度 API"),
     "langsearch": lambda: unimplemented("官方只给 token 日额度，没有查询端点"),
@@ -232,7 +231,10 @@ def main(argv):
         render(out, as_json)
     else:
         ok = [k for k, v in out.items() if v.get("state") == "ok"]
-        bad = [k for k, v in out.items() if v.get("state") in ("error", "no_permission")]
+        # 只报还在 PROBES 里的通道 —— 已退役的（如 brightdata）留在 quota.json 里的
+        # 旧异常不该每轮都喊一次
+        bad = [k for k, v in out.items()
+               if k in PROBES and v.get("state") in ("error", "no_permission")]
         if bad:
             print(f"[quota_probe] 校准异常：{', '.join(bad)}（其余 {len(ok)} 家正常）", file=sys.stderr)
     return 0

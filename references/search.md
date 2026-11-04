@@ -35,7 +35,7 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 | 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补反向体验 | Jina 读官方文档原文；`<候选> vs`、`<候选> 问题`、`<候选> 替代` |
 
 只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 默认档
-默认档 19 路里 15 路免 key，`--deep` 的 3 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
+默认档 19 路里 12 路完全免 key，`--deep` 的 3 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
 
 **L3 深调研**（10 来源 / 3 轮 / 必含反证）
 

@@ -61,10 +61,10 @@ for entry in re.split(r'\n(?=    \()', body):
     deep = bool(d and d.group(1) == 'True')
     key, name = m.groups()
     print(f"  {key:10s} {'deep' if deep else 'base':4s}  {name}")
-print("\n  用法: fanout.sh \"<query>\" [--deep] [--n N] [--on key1,key2]")
+print("\n  用法: fanout.sh \"<query>\" [--deep] [--n N] [--on key1,key2] [--en \"<english>\"]")
 PY
       exit 0 ;;
-    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) [ -z "$Q" ] && Q="$1" ;;
   esac
   shift
@@ -297,6 +297,36 @@ f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
   if [ "$_qrc" != "0" ] || [ ! -s "$TMP/qianfan.txt" ] || [ -s "$TMP/qianfan.err" ]; then
     echo "err" > "$TMP/skip.qianfan"
     head -c 300 "$TMP/qianfan.err" >> "$TMP/qianfan.txt" 2>/dev/null
+  fi
+  # 免费额度降到 ≤20% 时 smart_search.py 会自动切备用 API，此时它吐的是裸 JSON
+  # （[⚠️ 自动跳过] ... 加一个 JSON 数组）。直接渲染就是把 JSON 当答案塞给用户。
+  # 识别出来转成正常条目，并标明这是降档结果而不是 AI 摘要。
+  if grep -qE '^\[\s*$' "$TMP/qianfan.txt" 2>/dev/null; then
+    python3 - "$TMP/qianfan.txt" > "$TMP/qianfan.md" <<'PYQ'
+import json, re, sys
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r"\[\s*\{.*\}\s*\]", raw, re.S)
+rows = []
+if m:
+    try:
+        rows = json.loads(m.group(0))
+    except Exception:
+        rows = []
+if not rows:
+    print(raw.strip()[:600])
+else:
+    out = []
+    for r in rows[:8]:
+        t = (r.get("title") or "").strip()
+        u = (r.get("url") or "").strip()
+        d = (r.get("date") or "").strip()[:10]
+        if not t:
+            continue
+        meta = " · ".join(x for x in (d, "百度降档结果") if x)
+        out.append(f"- [{t}]({u}) — {meta}" if u else f"- {t} — {meta}")
+    print("\n".join(out))
+PYQ
+    mv "$TMP/qianfan.md" "$TMP/qianfan.txt"
   fi
 }
 
@@ -772,7 +802,11 @@ def r_xhs():
         nid = it.get("id") or ""
         if not t or not nid:
             continue
-        rows.append((trunc(t, 80), "https://www.xiaohongshu.com/explore/" + nid, "小红书笔记"))
+        # 摘要给作者和赞数，「小红书笔记」这种复读平台名的占位没有信息量
+        _u = ((nc.get("user") or {}).get("nickname") or "").strip()
+        _l = ((nc.get("interact_info") or {}).get("liked_count") or "").strip()
+        _meta = " · ".join(x for x in (_u, (_l + " 赞") if _l else "") if x) or "小红书笔记"
+        rows.append((trunc(t, 80), "https://www.xiaohongshu.com/explore/" + nid, _meta))
     return rowify(rows)
 
 def r_bili():
@@ -1164,39 +1198,39 @@ for key, name, note, fn, deep_only in SECTIONS:
             except Exception:
                 pass
         print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "key":
         print(f"### 🔇 {name} —— 未配置 API key（写入 `~/.config/agents/env` 即解锁）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "quota":
         print(f"### 🔇 {name} —— 已越免费线，本轮自动跳过\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "cjk":
         print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
               f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip and skip.startswith("cooldown:"):
         print(f"### 🔇 {name} —— {skip.split(':', 1)[1]} 分钟内刚搜过"
               f"（这类通道连打会触发风控验证码，所以设了最小间隔）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "no-english":
         # 插件侧会包一层「跳过（note）」，这里不要再写「本轮跳过」否则双重嵌套
         print(f"### 🔇 {name} —— query 里没有英文关键词（GitHub 只认英文，中文搜不到）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "captcha":
         print(f"### 🔇 {name} —— 平台风控要验证码（等几小时或换个词；不影响其余通道）\n")
-        skipped.append(name); mark(key, "skip")
+        skipped.append(key); mark(key, "skip")
         continue
     if skip == "err":
         detail = load_text(key + ".txt") or ""
         print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
-        failed.append(name); mark(key, "fail")
+        failed.append(key); mark(key, "fail")
         continue
     try:
         rows = fn()
@@ -1206,7 +1240,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     code = http_code(key)
     if code and code not in ("200", "000") and (rows is None or rows == [] or isinstance(rows, tuple)):
         print(f"### ⚠️ {name} —— HTTP {code}（参数/凭据/限流问题，不是「没搜到」）\n")
-        failed.append(name); mark(key, "fail")
+        failed.append(key); mark(key, "fail")
         continue
     if isinstance(rows, str):                      # 千帆文本
         body = rows.strip()
@@ -1214,11 +1248,11 @@ for key, name, note, fn, deep_only in SECTIONS:
             okc += 1; mark(key, "ok")
             print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
         else:
-            print(f"### ❌ {name} —— 无返回\n"); failed.append(name); mark(key, "fail")
+            print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail")
     elif isinstance(rows, tuple):                  # ("ERR", msg)
-        print(f"### ⚠️ {name} —— {rows[1]}\n"); failed.append(name); mark(key, "fail")
+        print(f"### ⚠️ {name} —— {rows[1]}\n"); failed.append(key); mark(key, "fail")
     elif rows is None:
-        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(name); mark(key, "fail")
+        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(key); mark(key, "fail")
     elif not rows:
         zero += 1; mark(key, "ok")
         print(f"### ⚪ {name} —— 通道正常，0 命中\n")
@@ -1293,7 +1327,10 @@ def _left(v):
         return None
 
 weak = []
+_active_keys = {_s[0] for _s in SECTIONS}
 for k, v in health.items():
+    if k not in _active_keys:      # 已从档位移除的通道（如 bd）不再报
+        continue
     if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
         continue
     left = _left(v)

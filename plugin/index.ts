@@ -364,6 +364,7 @@ interface Parsed {
   consensus: string[];
   summary: string;
   next: string;
+  warn?: string;
   health: string;
 }
 
@@ -494,6 +495,8 @@ function renderSearch(
   }
   if (parsed.summary) lines.push("", `汇总：${parsed.summary}`);
   if (parsed.health) lines.push(`通道健康：${parsed.health}`);
+  // fanout.sh 已经在 md 里写了「下一步」，这里不重复；只补上它打到 stderr 的警告
+  if (parsed.warn) lines.push(`⚠️ ${parsed.warn}`);
   return lines.join("\n");
 }
 
@@ -522,7 +525,14 @@ async function runFanout(
   channels: string,
   source = "",
   ctx?: unknown,
-): Promise<{ md: string; secs: number; on: string; why: string; unclear?: boolean }> {
+): Promise<{
+  md: string;
+  secs: number;
+  on: string;
+  why: string;
+  unclear?: boolean;
+  warn?: string;
+}> {
   const args = [FANOUT, query];
   if (profile === "deep") args.push("--deep");
   let why = "";
@@ -547,12 +557,18 @@ async function runFanout(
   if (source) env.D_REACH_SOURCE = source;
   // 插件这边的 t0 比 fanout.sh 自己算的准（含进程启动），history 里的耗时以它为准
   env.D_REACH_T0 = String(Math.floor(t0 / 1000));
-  const { stdout } = await run("bash", args, {
+  const { stdout, stderr } = await run("bash", args, {
     timeout: 200_000,
     maxBuffer: 8 << 20,
     env,
   });
-  return { md: stdout, secs: (Date.now() - t0) / 1000, on, why, unclear };
+  // fanout.sh 把「忽略未知通道」打到 stderr。只取 stdout 会把它静默吞掉，
+  // 用户看到头部写着原 channels 却不知道实际跑的是别的几路。
+  const warn =
+    String(stderr ?? "")
+      .split("\n")
+      .find((l) => l.includes("忽略未知通道")) ?? "";
+  return { md: stdout, secs: (Date.now() - t0) / 1000, on, why, unclear, warn };
 }
 
 async function persist(md: string, tag: string): Promise<string> {
@@ -1978,7 +1994,7 @@ const searchTool = defineTool({
       };
     const profile = (params.profile ?? "auto") as Profile;
     try {
-      const { md, secs, on, why, unclear } = await runFanout(
+      const { md, secs, on, why, unclear, warn } = await runFanout(
         query,
         profile,
         params.channels ?? "",
@@ -1986,6 +2002,7 @@ const searchTool = defineTool({
         ctx,
       );
       const parsed = parseFanout(md);
+      if (warn) parsed.warn = warn;
       const file = await persist(md, query);
       const perChannel =
         params.detail === "full" ? 8 : profile === "quick" ? 3 : 2;
@@ -2347,6 +2364,46 @@ async function probeSocial(p: SocialPlatform) {
   };
 }
 
+/**
+ * 把 xhs / bili 的 JSON 渲染成可读列表。
+ *
+ * 原来直接 JSON.stringify 塞 6000 字符进 ```json``` 代码块，用户得自己从
+ * note_card.display_title 里扒标题 —— 工具输出不该是这个形态。
+ */
+function renderSocial(platform: string, parsed: any): string {
+  const lines: string[] = [];
+  if (platform === "xhs") {
+    for (const it of parsed?.data?.items ?? []) {
+      const nc = it?.note_card ?? {};
+      const t = String(nc.display_title || nc.desc || "").trim();
+      const nid = String(it?.id ?? "");
+      if (!t || !nid) continue;
+      const meta = [nc.user?.nickname, nc.interact_info?.liked_count && `${nc.interact_info.liked_count} 赞`]
+        .filter(Boolean)
+        .join(" · ");
+      lines.push(
+        `- [${t.slice(0, 80)}](https://www.xiaohongshu.com/explore/${nid})` +
+          (meta ? ` — ${meta}` : ""),
+      );
+    }
+    return lines.length ? lines.join("\n") : "（没有可读笔记）";
+  }
+  if (platform === "bili") {
+    const vs = parsed?.result?.videos ?? parsed?.data?.result?.videos ?? [];
+    for (const v of vs) {
+      const t = String(v?.title ?? "").trim();
+      const bv = String(v?.bvid ?? "");
+      if (!t || !bv) continue;
+      const meta = [v?.author, v?.play && `${v.play} 播放`, v?.duration].filter(Boolean).join(" · ");
+      lines.push(
+        `- [${t.slice(0, 80)}](https://www.bilibili.com/video/${bv})` + (meta ? ` — ${meta}` : ""),
+      );
+    }
+    return lines.length ? lines.join("\n") : "（没有可读视频）";
+  }
+  return "```json\n" + JSON.stringify(parsed, null, 2).slice(0, 4000) + "\n```";
+}
+
 const socialTool = defineTool({
   name: "d_reach_social",
   label: "d-reach 社交平台",
@@ -2432,11 +2489,8 @@ const socialTool = defineTool({
       );
       let rendered = stdout.trim();
       try {
-        const parsed = JSON.parse(rendered) as { data?: unknown };
-        rendered =
-          "```json\n" +
-          JSON.stringify(parsed.data ?? parsed, null, 2).slice(0, 6000) +
-          "\n```";
+        const parsed = JSON.parse(rendered) as { data?: any; result?: any };
+        rendered = renderSocial(target.platform, parsed);
       } catch {
         /* 非 JSON 就原样给 */
       }
