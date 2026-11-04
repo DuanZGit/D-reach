@@ -302,7 +302,7 @@ f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
 
 f_tf() {   # TinyFish Search（官方 hosted MCP，$0/次；JSON-RPC tools/call search）
   gate tinyfish || return 0
-  TF_KEY="$TF_KEY" python3 - "$Q" > "$TMP/tf.json" 2>"$TMP/tf.err" <<'PYEOF'
+  TF_KEY="$TF_KEY" python3 - "$ENQ" > "$TMP/tf.json" 2>"$TMP/tf.err" <<'PYEOF'
 import json, os, sys, urllib.request
 
 q = sys.argv[1]
@@ -335,7 +335,7 @@ f_langsearch() {
   gate langsearch || return 0
   curl -s --max-time 30 -X POST "https://api.langsearch.com/v1/web-search" \
     -H "Authorization: Bearer $LS_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":20}))' "$Q")" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":20}))' "$ENQ")" \
     -o "$TMP/langsearch.json" -w '%{http_code}' > "$TMP/langsearch.http" 2>/dev/null
   [ "$(cat "$TMP/langsearch.http" 2>/dev/null)" = "200" ] && charge langsearch
 }
@@ -367,13 +367,13 @@ f_tavily() {   # Tavily keyless：无账号无 key，结果带 1400 字级正文
   # 与 serper 的区别：serper 只给标题+两行 snippet，它给整段正文，中文 query 实测 5/5 命中。
   curl -s --max-time 20 -X POST "https://api.tavily.com/search" \
     -H 'Content-Type: application/json' -H 'X-Tavily-Access-Mode: keyless' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"max_results":8}))' "$Q")" \
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"max_results":8}))' "$ENQ")" \
     -o "$TMP/tavily.json" -w '%{http_code}' > "$TMP/tavily.http" 2>/dev/null
 }
 f_parallel() {   # Parallel 免费 MCP（web_search）：无 key 无账号，结果带 excerpts + 发布日期
   # 走 MCP 握手（initialize → notifications/initialized → tools/call），交给 mcp_call.py。
   python3 "$DIR/mcp_call.py" https://mcp.parallel.ai/mcp web_search \
-    "$(python3 -c 'import json,sys;q=sys.argv[1];print(json.dumps({"objective":q,"search_queries":[q]}))' "$Q")" \
+    "$(python3 -c 'import json,sys;q=sys.argv[1];print(json.dumps({"objective":q,"search_queries":[q]}))' "$ENQ")" \
     > "$TMP/parallel.json" 2>/dev/null
   # 失败时脚本打 MCP_ERROR 行（不是 JSON），标 skip 而不是让解析器报「无响应」
   if [ "$(head -c 11 "$TMP/parallel.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
@@ -385,7 +385,7 @@ f_youcom() {   # You.com 免 key MCP（you-search）：100 次/天，官方称 p
   # 官方定价页明确「No API key, no account, no credit card」，走 ?profile=free 档。
   # 注意：该网关会 403 掉 Python-urllib 默认 UA，mcp_call.py 里已固定 d-reach/1.0。
   python3 "$DIR/mcp_call.py" "https://api.you.com/mcp?profile=free" you-search \
-    "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":6}))' "$Q")" \
+    "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"count":6}))' "$ENQ")" \
     > "$TMP/youcom.json" 2>/dev/null
   if [ "$(head -c 11 "$TMP/youcom.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
     head -c 300 "$TMP/youcom.json" > "$TMP/skip.youcom"
@@ -465,6 +465,41 @@ except Exception: print("")' 2>/dev/null
   ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].replace(" ","_")))' "$TITLE" 2>/dev/null)
   curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" "https://zh.wikipedia.org/api/rest_v1/page/summary/$ENC" \
     -o "$TMP/wiki.json" -w '%{http_code}' > "$TMP/wiki.http" 2>/dev/null
+
+  # 中文条目常常只有一句话（实测「小米手环」64 字符、「RAG」174 字符，
+  # 而英文同条目 689 字符）。内容太短就用英文 query 再查一遍英文维基，取长的那个。
+  ZH_LEN=$(python3 -c 'import json,sys
+try: print(len(json.load(open(sys.argv[1])).get("extract") or ""))
+except Exception: print(0)' "$TMP/wiki.json" 2>/dev/null || echo 0)
+  if [ "${ZH_LEN:-0}" -lt 300 ] && [ -n "$ENQ" ] && [ "$ENQ" != "$Q" ]; then
+    EN_TITLE=$(curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" -G \
+      "https://en.wikipedia.org/w/api.php" \
+      --data-urlencode "action=query" --data-urlencode "list=search" \
+      --data-urlencode "srsearch=$ENQ" --data-urlencode "srlimit=1" \
+      --data-urlencode "format=json" \
+      | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); s=(d.get("query") or {}).get("search") or []; print(s[0]["title"] if s else "")
+except Exception: print("")' 2>/dev/null)
+    if [ -n "$EN_TITLE" ]; then
+      EN_ENC=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1].replace(" ","_")))' "$EN_TITLE" 2>/dev/null)
+      curl -s --max-time 12 -A "d-reach/1.0 (+https://github.com/DuanZGit/D-reach)" \
+        "https://en.wikipedia.org/api/rest_v1/page/summary/$EN_ENC" -o "$TMP/wiki_en.json" 2>/dev/null
+      python3 - "$TMP/wiki.json" "$TMP/wiki_en.json" <<'PYPICK'
+import json, sys
+zh_f, en_f = sys.argv[1], sys.argv[2]
+def load(f):
+    try: return json.load(open(f))
+    except Exception: return {}
+zh, en = load(zh_f), load(en_f)
+if len(en.get("extract") or "") > len(zh.get("extract") or ""):
+    json.dump(en, open(zh_f, "w"))
+    print("en", file=sys.stderr)
+else:
+    print("zh", file=sys.stderr)
+PYPICK
+    fi
+  fi
 }
 f_bd() {  # ⚠️ 已从档位移除（2026-11-04）：Google 搜索实测 31.4s，超过 25s 硬超时必然失败；
            # Serper 已覆盖同一需求且快 17 倍。要恢复：加回 467 行 deep 循环 + 恢复 SECTIONS 条目。
