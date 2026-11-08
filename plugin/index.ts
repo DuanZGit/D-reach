@@ -1830,17 +1830,39 @@ async function viaArchiveToday(url: string): Promise<Fetched | null> {
  * 返回 null 表示该档不适用（域名不匹配 / 没配 key），不计入失败。
  */
 async function fetchUrl(url: string, maxChars: number) {
+  // 国内电商在无登录态下对所有通道都是同一堵墙：实测 2026-11-08 京东商品页
+  // https://item.jd.com/10230695839309.html 跑完 curl/Playwright/TinyFish/Parallel/Jina
+  // 五档 78.2s（十档 99.7s）全判「要登录/反爬」，连 https://item.m.jd.com 也会
+  // 302 到 cfe.m.jd.com/privatedomain/risk_handler 的「京东验证」页。
+  // 所以只留 curl（本机 IP）和 Jina（外部 IP）各一次机会，≤20s 就给结论。
+  const EC_HOSTS = [
+    "jd.com", "jd.hk", "taobao.com", "tmall.com", "tmall.hk",
+    "pinduoduo.com", "yangkeduo.com", "1688.com", "suning.com", "vip.com",
+  ];
+  const ecHost = EC_HOSTS.some((h) => {
+    try {
+      return new URL(url).hostname.endsWith(h);
+    } catch {
+      return false;
+    }
+  });
   const attempts: Array<[string, () => Promise<Fetched | null>]> = [
     ["微信直连", () => viaWeixinDirect(url)],
     ["cookie 注入", () => viaCookieInject(url)],
     ["curl 直连", () => viaCurl(url)],
-    ["Playwright 渲染", () => viaPlaywright(url)],
-    ["TinyFish fetch", () => viaTinyfish(url)],
-    ["Parallel fetch", () => viaParallelFetch(url)],
-    ["Jina Reader", () => viaJina(url)],
-    ["markdown.new", () => viaMarkdownNew(url)],
-    ["BrightData", () => viaBrightdata(url)],
-    ["archive.today", () => viaArchiveToday(url)],
+    ...(ecHost
+      ? ([["Jina Reader", () => viaJina(url)]] as Array<
+          [string, () => Promise<Fetched | null>]
+        >)
+      : ([
+          ["Playwright 渲染", () => viaPlaywright(url)],
+          ["TinyFish fetch", () => viaTinyfish(url)],
+          ["Parallel fetch", () => viaParallelFetch(url)],
+          ["Jina Reader", () => viaJina(url)],
+          ["markdown.new", () => viaMarkdownNew(url)],
+          ["BrightData", () => viaBrightdata(url)],
+          ["archive.today", () => viaArchiveToday(url)],
+        ] as Array<[string, () => Promise<Fetched | null>]>) ),
   ];
   const skipped: Array<{ stage: string; cls: FailClass; detail: string }> = [];
   /** 提前收工的四种终止条件共用同一份骨架，只传各自的标志位。 */
