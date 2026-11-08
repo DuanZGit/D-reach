@@ -111,11 +111,13 @@ except Exception:
     h = {}
 now = datetime.now(timezone.utc)
 for k, v in h.items():
-    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+    if not isinstance(v, dict):
         continue
     until = v.get("suspend_until")
     if not until:
         continue                      # 没有到期时间 = 该放行一次，让 mark 补上退避
+    # 挂起现在按「失败性质」写：确定性结论（要登录/限流）首败就挂，
+    # 自愈类连败 3 次才挂 —— 所以这里只看有没有未到期的挂起，不再看连败次数。
     try:
         if datetime.fromisoformat(until) > now:
             bad.append(k)             # 还在挂起期内
@@ -583,6 +585,10 @@ wait
 # 本轮起始时间：给 history.jsonl 算耗时用（调用方已给就沿用，比如插件那边能算得更准）
 [ -n "${D_REACH_T0:-}" ] || D_REACH_T0=$(date +%s)
 export D_REACH_T0
+# 脚本指纹：通道的「这路坏了/要登录」结论绑定它。改了脚本旧结论自动作废，
+# 不用手删 channels.json（照 Agent-Reach 的 fingerprint 失效机制）。
+D_REACH_FP=$(md5sum "$DIR/fanout.sh" 2>/dev/null | cut -c1-8)
+export D_REACH_FP
 
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
 import json, os, re, sys, html, pathlib, time
@@ -1129,26 +1135,59 @@ now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 # 取小值是为了「坏通道别永久静默」——挂起到期会自动重试一次，通了就清零。
 BACKOFF = [600, 1800, 7200]
 
-ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
-def mark(key, status):
-    """只记「连败几次 + 最后成败时间 + 挂起到期时间」。skip 不计失败，避免本轮没请求把通道判死。
+# 失败的「性质」决定要不要等它自己好。照 Agent-Reach 的错误码分层：
+#   自愈类（timeout/upstream/empty）—— 连败 3 次才进退避阶梯；
+#   确定性结论（登录墙/风控/凭据/限流/端点没了）—— 重试只会撞同一堵墙，
+#   首次就挂起，并且文案要说清「谁该出手」，而不是干巴巴一句「连败 N 次」。
+NEEDS = {
+    "login": "站点要登录：浏览器里登录过一次，或换公开来源",
+    "antibot": "撞了风控验证码：等几小时或换检索词",
+    "auth": "key 失效或被拒：换 key 后自动恢复",
+    "ratelimit": "平台限流：冷却窗口内不再打",
+    "notfound": "端点 404：脚本里的地址要更新",
+    "setup": "本机依赖不可用：先修依赖",
+}
+NEEDS_TITLE = {
+    "login": "要登录", "antibot": "要过验证码", "auth": "凭据失效",
+    "ratelimit": "限流中", "notfound": "端点失效", "setup": "依赖缺失",
+}
+NEEDS_TTL = 6 * 3600        # 确定性结论挂 6 小时，到期给一次自愈机会，不永久静默
+FP = os.environ.get("D_REACH_FP") or ""
 
-    连败 ≥3 次进挂起，退避 10 分钟 → 30 分钟 → 2 小时封顶（用户要求退避短一些）。
-    到期自动重试一次：成功清零、失败继续升级。这样通道不会「跳过→不跑→永不成功」死锁。
+# 脚本改过 → 旧的「这路坏了」结论可能已不成立，作废重测
+for _k, _v in health.items():
+    if isinstance(_v, dict) and _v.get("fp") and FP and _v["fp"] != FP:
+        for _f in ("suspend_until", "suspend_secs", "code", "streak_fail"):
+            _v.pop(_f, None)
+
+ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
+def mark(key, status, code=None):
+    """记「失败性质 + 连败次数 + 成败时间 + 挂起到期」。skip 不计失败，避免本轮没请求把通道判死。
+
+    自愈类连败 ≥3 进退避：10 分钟 → 30 分钟 → 2 小时封顶；
+    确定性类（NEEDS）首次失败就挂 6 小时，并在输出里点名该做什么。
+    到期自动重试一次：成功清零、失败继续升级。通道不会「跳过→不跑→永不成功」死锁。
     """
     v = health.setdefault(key, {"streak_fail": 0})
     ROUND.append({"key": key, "status": status})
+    if FP:
+        v["fp"] = FP
     if status == "ok":
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
-        v.pop("suspend_until", None)   # 成功即解除挂起
-        v.pop("suspend_secs", None)
+        for f in ("suspend_until", "suspend_secs", "code"):   # 成功即解除挂起
+            v.pop(f, None)
     elif status == "fail":
-        v["streak_fail"] = v.get("streak_fail", 0) + 1
         v["last_fail"] = now_iso
-        n = v["streak_fail"]
-        if n >= 3:
-            secs = BACKOFF[min(n - 3, len(BACKOFF) - 1)]
+        code = code or "upstream"
+        v["code"] = code
+        if code in NEEDS:
+            secs = NEEDS_TTL
+        else:
+            v["streak_fail"] = v.get("streak_fail", 0) + 1
+            n = v["streak_fail"]
+            secs = BACKOFF[min(n - 3, len(BACKOFF) - 1)] if n >= 3 else 0
+        if secs:
             v["suspend_until"] = (
                 datetime.now(timezone.utc) + timedelta(seconds=secs)
             ).isoformat(timespec="seconds")
@@ -1200,6 +1239,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "health":
         v = health.get(key) or {}
         bad = v.get("streak_fail", 0)
+        _code = v.get("code") or ""
         until = v.get("suspend_until")
         left = ""
         if until:
@@ -1209,7 +1249,11 @@ for key, name, note, fn, deep_only in SECTIONS:
                     left = f"，{int(delta // 60) + 1} 分钟后自动重试"
             except Exception:
                 pass
-        print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
+        if _code in NEEDS:
+            print(f"### 🔇 {name} —— {NEEDS_TITLE.get(_code, '通道异常')}，先不打了{left}"
+                  f"（{NEEDS[_code]}；`--force` 可强跑）\n")
+        else:
+            print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
         skipped.append(key); mark(key, "skip")
         continue
     if skip == "key":
@@ -1243,7 +1287,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "err":
         detail = load_text(key + ".txt") or ""
         print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
-        failed.append(key); mark(key, "fail")
+        failed.append(key); mark(key, "fail", "setup")
         continue
     try:
         rows = fn()
@@ -1252,8 +1296,13 @@ for key, name, note, fn, deep_only in SECTIONS:
         print(f"<!-- {key} 解析异常: {type(e).__name__}: {str(e)[:120]} -->", file=sys.stderr)
     code = http_code(key)
     if code and code not in ("200", "000") and (rows is None or rows == [] or isinstance(rows, tuple)):
-        print(f"### ⚠️ {name} —— HTTP {code}（参数/凭据/限流问题，不是「没搜到」）\n")
-        failed.append(key); mark(key, "fail")
+        # 状态码本身就是结论：429 是限流（再打更糟）、401/403 是凭据、404 是端点没了，
+        # 这三类都算确定性失败；5xx 才当上游抖动、靠退避自愈。
+        _cls = ("ratelimit" if code == "429" else
+                "auth" if code in ("401", "403") else
+                "notfound" if code == "404" else "upstream")
+        print(f"### ⚠️ {name} —— HTTP {code}（{NEEDS_TITLE.get(_cls, '上游异常')}，不是「没搜到」）\n")
+        failed.append(key); mark(key, "fail", _cls)
         continue
     if isinstance(rows, str):                      # 千帆文本
         body = rows.strip()
@@ -1261,11 +1310,14 @@ for key, name, note, fn, deep_only in SECTIONS:
             okc += 1; txt_only += 1; mark(key, "ok")
             print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
         else:
-            print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail")
+            print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail", "empty")
     elif isinstance(rows, tuple):                  # ("ERR", msg)
-        print(f"### ⚠️ {name} —— {rows[1]}\n"); failed.append(key); mark(key, "fail")
+        _msg = str(rows[1])
+        _low = _msg.lower()
+        _cls = "timeout" if ("超时" in _msg or "timed out" in _low or "timeout" in _low) else "upstream"
+        print(f"### ⚠️ {name} —— {_msg}\n"); failed.append(key); mark(key, "fail", _cls)
     elif rows is None:
-        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(key); mark(key, "fail")
+        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(key); mark(key, "fail", "timeout")
     elif not rows:
         zero += 1; mark(key, "ok")
         print(f"### ⚪ {name} —— 通道正常，0 命中\n")
@@ -1339,18 +1391,24 @@ def _left(v):
     except Exception:
         return None
 
-weak = []
+weak, need = [], []
 _active_keys = {_s[0] for _s in SECTIONS}
 for k, v in health.items():
     if k not in _active_keys:      # 已从档位移除的通道（如 bd）不再报
         continue
-    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+    if not isinstance(v, dict):
         continue
     left = _left(v)
-    weak.append(
-        f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
-        else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
-    )
+    _code = v.get("code") or ""
+    if _code in NEEDS:
+        # 确定性结论：不是「次数到了」，是「这条路需要人处理」，措辞必须不同
+        need.append(f"{k}（{NEEDS_TITLE.get(_code, '异常')}"
+                    + (f"，{left // 60 + 1} 分钟后重试" if left else "") + "）")
+    elif v.get("streak_fail", 0) >= 3:
+        weak.append(
+            f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
+            else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
+        )
 _head = (
     f"{okc - txt_only} 路有结果，共 {total} 条来源"
     if total
@@ -1362,6 +1420,8 @@ print(f"---\n**汇总**：{_head}"
       + (f"；{len(skipped)} 路跳过（{ '、'.join(skipped) }）" if skipped else "") + "。\n")
 if weak:
     print(f"**通道健康**：{'、'.join(weak)}。\n")
+if need:
+    print(f"**要你出手**：{'、'.join(need)}。\n")
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research）。")

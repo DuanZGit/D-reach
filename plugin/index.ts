@@ -716,6 +716,112 @@ const FAIL_LABEL: Record<FailClass, string> = {
 /** 这几类重试无益，必须人或浏览器会话介入。 */
 const NEEDS_HUMAN: FailClass[] = ["antibot", "login", "nocred"];
 
+/**
+ * 每类失败对应「谁该做什么」，照 Agent-Reach 的 DEFAULT_HINTS。
+ * 只报类别名等于让用户自己猜下一步，这里给成一句可直接执行的行动。
+ */
+const FAIL_ACTION: Record<FailClass, string> = {
+  network: "网络这条通路断了，等它恢复或换出口",
+  antibot: "站点在验证你是不是人：浏览器里过一次验证码，或换公开来源",
+  paywall: "付费内容，换通道换不来订阅，别再试",
+  login: "要登录：在浏览器里登录一次，或换公开来源",
+  parse: "这页解析不出正文，换个来源更快",
+  empty: "空壳页或已不存在，别再降级",
+  nocred: "缺凭据：配好 key 才会好",
+  ratelimit: "对方限流：等冷却，继续试只会更糟",
+};
+
+/**
+ * 抓回来的是不是正文。照 Agent-Reach 的 _readable() 补的终局校验，
+ * 专挡两种「假成功」：整页只有一句登录/验证提示、正文等于标题的空壳页。
+ * 只认「短 + 命中墙词」的组合 —— 短正文本身是正常的（通知、公告页），不能一刀切。
+ */
+const WALL_TEXT =
+  /^(?:请\s*(?:先)?(?:登录|登入|注册)[^\n]{0,40}|(?:please\s+)?(?:log|sign)\s*in[^\n]{0,40}|join\s+(?:now|linkedin)[^\n]{0,40}|just a moment|checking your browser|verify you are (a\s+)?human|access denied|security verification|安全验证|访问过于频繁|当前环境异常)[。.!！\s]*$/i;
+
+function contentIsReal(text: string): { cls: FailClass; detail: string } | null {
+  const t = text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return { cls: "empty", detail: "正文为空" };
+  const firstLine = (text.split("\n")[0] ?? "").trim();
+  if (t.length < 80 && firstLine && t.toLowerCase() === firstLine.toLowerCase())
+    return { cls: "empty", detail: "只有标题没有正文（空壳页）" };
+  if (t.length < 400 && WALL_TEXT.test(t))
+    return { cls: "login", detail: "整页只有一句登录/验证提示" };
+  return null;
+}
+
+// ---------------------------------------------------------------- 站点死档记忆
+//
+// 同一个站点上一轮已经确认「要登录 / 撞风控 / 付费墙」，下一轮不必把这套通道再捶一遍。
+// 照 Agent-Reach 的后端暂停：只记确定性结论、带 6 小时时效、站点一旦抓通就清空。
+// 只按主机名记 —— 登录态和风控是站点级，不是单页级。
+const DEAD_FILE = join(homedir(), ".agent-reach", "fetch-dead.json");
+const DEAD_TTL = 6 * 3600 * 1000;
+const DEAD_CLS: FailClass[] = ["login", "antibot", "paywall"];
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+async function loadDead(url: string): Promise<Map<string, FailClass>> {
+  const host = hostOf(url);
+  const out = new Map<string, FailClass>();
+  if (!host) return out;
+  try {
+    const all = JSON.parse(await readFile(DEAD_FILE, "utf8")) as Record<
+      string,
+      Record<string, { cls?: string; at?: number }>
+    >;
+    for (const [stage, v] of Object.entries(all[host] ?? {})) {
+      if (!DEAD_CLS.includes(v.cls as FailClass)) continue;
+      if (Date.now() - (v.at ?? 0) >= DEAD_TTL) continue;
+      out.set(stage, v.cls as FailClass);
+    }
+  } catch {
+    /* 没有账本文件 / 坏了：当作没有记忆 */
+  }
+  return out;
+}
+
+async function saveDead(url: string, stage: string, cls: FailClass): Promise<void> {
+  const host = hostOf(url);
+  if (!host || !DEAD_CLS.includes(cls)) return;
+  try {
+    let all: Record<string, Record<string, { cls: string; at: number }>> = {};
+    try {
+      all = JSON.parse(await readFile(DEAD_FILE, "utf8"));
+    } catch {
+      /* 首次写入 */
+    }
+    all[host] = { ...(all[host] ?? {}), [stage]: { cls, at: Date.now() } };
+    await mkdir(dirname(DEAD_FILE), { recursive: true });
+    await writeFile(DEAD_FILE, JSON.stringify(all, null, 2), "utf8");
+  } catch {
+    /* 记账失败不影响抓取 */
+  }
+}
+
+async function clearDead(url: string): Promise<void> {
+  const host = hostOf(url);
+  if (!host) return;
+  try {
+    const all = JSON.parse(await readFile(DEAD_FILE, "utf8")) as Record<string, unknown>;
+    if (!(host in all)) return;
+    delete all[host];
+    await writeFile(DEAD_FILE, JSON.stringify(all, null, 2), "utf8");
+  } catch {
+    /* ignore */
+  }
+}
+
+
 class StageFail extends Error {
   constructor(
     readonly cls: FailClass,
@@ -1865,6 +1971,17 @@ async function fetchUrl(url: string, maxChars: number) {
         ] as Array<[string, () => Promise<Fetched | null>]>) ),
   ];
   const skipped: Array<{ stage: string; cls: FailClass; detail: string }> = [];
+  // 上次已确认过不去的档，本轮直接跳过并把原因写进 skipped（用户看到「已确认」，不是「没跑」）
+  const dead = await loadDead(url);
+  for (const [stage, cls] of dead) {
+    if (attempts.some(([s]) => s === stage))
+      skipped.push({
+        stage,
+        cls,
+        detail: "该站点 6 小时内已确认这档过不去，本轮不再重试",
+      });
+  }
+  const liveAttempts = attempts.filter(([stage]) => !dead.has(stage));
   /** 提前收工的四种终止条件共用同一份骨架，只传各自的标志位。 */
   const bail = (extra: {
     ratelimited?: string;
@@ -1881,10 +1998,24 @@ async function fetchUrl(url: string, maxChars: number) {
     notfound: undefined as boolean | undefined,
     ...extra,
   });
-  for (const [stage, fn] of attempts) {
+  for (const [stage, fn] of liveAttempts) {
     try {
       const got = await fn();
       if (!got) continue;
+      // 抓到 ≠ 抓对：整页一句登录提示 / 只有标题的空壳页也是「成功返回」
+      const fake = contentIsReal(got.text);
+      if (fake) {
+        skipped.push({ stage, cls: fake.cls, detail: fake.detail });
+        void saveDead(url, stage, fake.cls);
+        if (fake.cls === "login" || fake.cls === "antibot") {
+          const walls = skipped.filter(
+            (s) => s.cls === "login" || s.cls === "antibot" || s.cls === "paywall",
+          );
+          if (walls.length >= 4) return { ...bail(), needHuman: walls };
+        }
+        continue;
+      }
+      void clearDead(url);          // 站点抓通了，旧的死档记录作废
       const text =
         got.text.length > maxChars
           ? got.text.slice(0, maxChars) + "\n…（已截断）"
@@ -1896,11 +2027,12 @@ async function fetchUrl(url: string, maxChars: number) {
         // 429/503 是对「我们这个 IP + 此刻这个节奏」的信号。换通道、换域名格式都没用，
         // 唯一正确答案是停下等。实测继续把 TinyFish/Jina/BrightData/archive 走完要 50s+。
         if (e.cls === "ratelimit") return bail({ ratelimited: e.detail });
-        // 登录墙 / 反爬是「这个页面」的定性判断：换通道换不来身份。实测京东商品页
+        if (DEAD_CLS.includes(e.cls)) void saveDead(url, stage, e.cls);
+        // 登录墙 / 反爬 / 付费墙是「这个页面」的定性判断：换通道换不来身份和订阅。实测京东商品页
         // 十档全败 99.7s，每一档都在说「要登录」。四档都这样判就是定论，剩下的
         // Jina / md.new / BrightData / archive 只会再烧 40–60s 和额度。
         const walls = skipped.filter(
-          (s) => s.cls === "login" || s.cls === "antibot",
+          (s) => s.cls === "login" || s.cls === "antibot" || s.cls === "paywall",
         );
         if (walls.length >= 4) return { ...bail(), needHuman: walls };
         // 二进制直链：不是「这一档没成」，是这个 URL 根本不是网页，后面七档全是浪费
@@ -2128,8 +2260,9 @@ const fetchTool = defineTool({
           : r.slow
             ? "\n\n**站点太慢**：自己直连和本地浏览器都超时，后面的限额通道也救不回来，已提前停手。稍后再试或换时段。"
             : r.needHuman.length
-              ? `\n\n**要你出手**：${[...new Set(r.needHuman.map((s) => FAIL_LABEL[s.cls]))].join("、")} 挡着，` +
-                "继续重试只会加重风控。请在浏览器里打开一次该链接（把验证码过掉 / 登录好），再把正文贴给我。"
+              ? `\n\n**要你出手**：${[...new Set(r.needHuman.map((s) => s.cls))]
+                  .map((c) => FAIL_ACTION[c])
+                  .join("；")}。`
               : "\n\n都是网络/解析类失败，可以稍后重试一次；仍不行就换通道或让用户贴正文。";
       // 提前停手时别说「十档都没拿到」—— 报实际试了几档，否则用户以为限额档也白跑了
       const head = r.notfound
@@ -2227,20 +2360,32 @@ const quotaTool = defineTool({
     // bd（BrightData Google）已于 2026-11-04 从全部档位移除，它的历史连败记录不是
     // 当前通道健康状态；报在这里会让人以为「下轮会自动跳过」的还有一路活通道。
     const RETIRED = new Set(["bd"]);
-    const bad = Object.entries(health)
-      .filter(
-        ([k, v]) =>
-          !RETIRED.has(k) &&
-          ((v as { streak_fail?: number }).streak_fail ?? 0) >= 3,
-      )
-      .map(([k]) => k);
+    type HRec = { streak_fail?: number; code?: string };
+    const NEED_TITLE: Record<string, string> = {
+      login: "要登录",
+      antibot: "要过验证码",
+      auth: "凭据失效",
+      ratelimit: "限流中",
+      notfound: "端点失效",
+      setup: "依赖缺失",
+    };
+    // 两类要分开报：连败是「它自己坏了、等退避」，code 是「确定性结论、要人出手」。
+    const bad: string[] = [];
+    const need: string[] = [];
+    for (const [k, v] of Object.entries(health)) {
+      if (RETIRED.has(k)) continue;
+      const rec = v as HRec;
+      if (rec.code && NEED_TITLE[rec.code]) need.push(`${k}（${NEED_TITLE[rec.code]}）`);
+      else if ((rec.streak_fail ?? 0) >= 3) bad.push(k);
+    }
 
     const lines: string[] = [
       "通道健康：",
       bad.length
         ? `  连败 ≥3（下轮自动跳过）：${bad.join(", ")}`
-        : "  全部正常",
+        : "  没有连败挂起的通道",
     ];
+    if (need.length) lines.push(`  要你出手：${need.join("、")}`);
     lines.push("", "限额通道：");
     for (const [svc, v] of Object.entries(quota)) {
       if (svc.startsWith("_") || typeof v !== "object" || v === null) continue;

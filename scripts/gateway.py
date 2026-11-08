@@ -569,9 +569,13 @@ let channels = [];      // /api/state 的通道
 let quota = {};         // key -> {used, limit, official}
 let lastRun = null;     // {q, deep, cells: {key: {status, count, note}}, stats}
 
+const CODE_TITLE = {login:'要登录', antibot:'要过验证码', auth:'凭据失效',
+                    ratelimit:'限流中', notfound:'端点失效', setup:'依赖缺失'};
 function cellFor(ch){
   const run = lastRun && lastRun.cells[ch.key];
   if (run) return run;
+  // 确定性结论优先于「连败几次」：要登录的通道 streak 一直是 0，只看次数会显成正常
+  if (ch.code && CODE_TITLE[ch.code]) return {status:'fail', count:0, note: CODE_TITLE[ch.code] + '，要你处理'};
   if (ch.streak_fail >= 3) return {status:'fail', count:0, note:'连败 ' + ch.streak_fail + ' 次，默认跳过'};
   if (ch.streak_fail > 0)  return {status:'warn', count:0, note:'上次失败 ' + ch.streak_fail + ' 次'};
   if (ch.last_ok)          return {status:'idle', count:0, note:'上次 ' + ch.last_ok.slice(5,16).replace('T',' ')};
@@ -993,6 +997,7 @@ def state():
         chans.append({
             "name": meta["name"], "key": meta["key"], "tier": meta["tier"],
             "streak_fail": v.get("streak_fail", 0),
+            "code": v.get("code"),
             "last_ok": v.get("last_ok"), "last_fail": v.get("last_fail"),
         })
     quota_rows = []
