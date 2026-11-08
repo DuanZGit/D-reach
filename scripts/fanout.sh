@@ -235,6 +235,12 @@ f_bili() {   # B 站视频搜索（需登录态；冷却 90 秒）
 }
 
 f_se() {     # StackExchange 排障
+  # 中文 query（调用方没给 --en）打 SO 恒 0 命中：q 是全词 AND，中文词组在 SO 上
+  # 几乎无索引。实测 8 天里 23 轮中文 query 送去 se，全部 0 命中 → 直接跳过省 15s。
+  if [ "$CJK" = "1" ] && [ "$ENQ" = "$Q" ]; then
+    echo "cjk" > "$TMP/skip.se"
+    return 0
+  fi
   # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
   # shellcheck disable=SC2086
   set -- $ENQ
@@ -245,6 +251,11 @@ f_se() {     # StackExchange 排障
     --data-urlencode "pagesize=5" -o "$TMP/se.json" -w '%{http_code}' > "$TMP/se.http" 2>/dev/null
 }
 f_hn() {     # HN 深技术讨论
+  # 同 f_se：HN 只认英文，中文 query 恒 0 命中（实测 8 天 6 次空转）
+  if [ "$CJK" = "1" ] && [ "$ENQ" = "$Q" ]; then
+    echo "cjk" > "$TMP/skip.hn"
+    return 0
+  fi
   curl -s --max-time 12 -G "https://hn.algolia.com/api/v1/search" \
     --data-urlencode "query=$ENQ" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" -w '%{http_code}' > "$TMP/hn.http" 2>/dev/null
 }
@@ -1144,6 +1155,7 @@ def mark(key, status):
             v["suspend_secs"] = secs
 
 total, okc, zero = 0, 0, 0
+txt_only = 0        # 只给 AI 摘要、没有来源链接的路数（千帆），不能算「有结果」
 
 # ---------- 跨源合并：先把每路输出缓冲住，最后统一排序 ----------
 # 同一 URL 在 3 个源都出现就重复 3 遍，读者得自己判可信度。SearXNG 的做法是全局合并：
@@ -1209,8 +1221,9 @@ for key, name, note, fn, deep_only in SECTIONS:
         skipped.append(key); mark(key, "skip")
         continue
     if skip == "cjk":
-        print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
-              f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
+        print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（这个通道只认英文词："
+              f"中文打过去恒 0 命中，或只匹配上\"配置/安装\"这类字面词返回噪声；"
+              f"调用方给出英文检索词就会自动放行）\n")
         skipped.append(key); mark(key, "skip")
         continue
     if skip and skip.startswith("cooldown:"):
@@ -1245,7 +1258,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     if isinstance(rows, str):                      # 千帆文本
         body = rows.strip()
         if body:
-            okc += 1; mark(key, "ok")
+            okc += 1; txt_only += 1; mark(key, "ok")
             print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
         else:
             print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail")
@@ -1338,7 +1351,12 @@ for k, v in health.items():
         f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
         else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
     )
-print(f"---\n**汇总**：{okc} 路有结果，共 {total} 条来源"
+_head = (
+    f"{okc - txt_only} 路有结果，共 {total} 条来源"
+    if total
+    else "0 条来源" + (f"（{txt_only} 路只给了 AI 摘要，没有来源链接）" if txt_only else "")
+)
+print(f"---\n**汇总**：{_head}"
       + (f"；{zero} 路 0 命中" if zero else "")
       + (f"；{len(failed)} 路失败（{ '、'.join(failed) }）" if failed else "")
       + (f"；{len(skipped)} 路跳过（{ '、'.join(skipped) }）" if skipped else "") + "。\n")

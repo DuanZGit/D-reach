@@ -1874,6 +1874,13 @@ async function fetchUrl(url: string, maxChars: number) {
         // 429/503 是对「我们这个 IP + 此刻这个节奏」的信号。换通道、换域名格式都没用，
         // 唯一正确答案是停下等。实测继续把 TinyFish/Jina/BrightData/archive 走完要 50s+。
         if (e.cls === "ratelimit") return bail({ ratelimited: e.detail });
+        // 登录墙 / 反爬是「这个页面」的定性判断：换通道换不来身份。实测京东商品页
+        // 十档全败 99.7s，每一档都在说「要登录」。四档都这样判就是定论，剩下的
+        // Jina / md.new / BrightData / archive 只会再烧 40–60s 和额度。
+        const walls = skipped.filter(
+          (s) => s.cls === "login" || s.cls === "antibot",
+        );
+        if (walls.length >= 4) return { ...bail(), needHuman: walls };
         // 二进制直链：不是「这一档没成」，是这个 URL 根本不是网页，后面七档全是浪费
         if (e.fatal === "binary") return bail({ fatal: e.detail });
         // 页面不存在是确定性结果：换十档都是同一份 404（实测跑完 44s，只换来 6 条「页面不存在」）。
@@ -2102,11 +2109,23 @@ const fetchTool = defineTool({
               ? `\n\n**要你出手**：${[...new Set(r.needHuman.map((s) => FAIL_LABEL[s.cls]))].join("、")} 挡着，` +
                 "继续重试只会加重风控。请在浏览器里打开一次该链接（把验证码过掉 / 登录好），再把正文贴给我。"
               : "\n\n都是网络/解析类失败，可以稍后重试一次；仍不行就换通道或让用户贴正文。";
+      // 提前停手时别说「十档都没拿到」—— 报实际试了几档，否则用户以为限额档也白跑了
+      const head = r.notfound
+        ? "页面不存在（404）"
+        : r.ratelimited
+          ? "被限流"
+          : r.fatal
+            ? "不是网页正文"
+            : r.slow
+              ? "站点太慢"
+              : r.needHuman.length
+                ? `${r.skipped.length} 档一致报要登录/反爬，已提前停手`
+                : "十档都没拿到正文";
       return {
         content: [
           {
             type: "text",
-            text: `${r.notfound ? "页面不存在（404）" : r.ratelimited ? "被限流" : r.fatal ? "不是网页正文" : r.slow ? "站点太慢" : "十档都没拿到正文"}（${secs}s）：\n${lines || "- 无适用档位"}${advice}`,
+            text: `${head}（${secs}s）：\n${lines || "- 无适用档位"}${advice}`,
           },
         ],
         details: {
@@ -2183,9 +2202,14 @@ const quotaTool = defineTool({
       }
     >;
 
+    // bd（BrightData Google）已于 2026-11-04 从全部档位移除，它的历史连败记录不是
+    // 当前通道健康状态；报在这里会让人以为「下轮会自动跳过」的还有一路活通道。
+    const RETIRED = new Set(["bd"]);
     const bad = Object.entries(health)
       .filter(
-        ([, v]) => ((v as { streak_fail?: number }).streak_fail ?? 0) >= 3,
+        ([k, v]) =>
+          !RETIRED.has(k) &&
+          ((v as { streak_fail?: number }).streak_fail ?? 0) >= 3,
       )
       .map(([k]) => k);
 
@@ -2596,12 +2620,29 @@ questions=[{name:"ticket", type:"choice", instructions:"是否需要买票进入
           isError: true,
         };
       }
-      const d = JSON.parse(raw) as {
+      let d: {
         mode?: string;
         answers?: Record<string, Record<string, unknown>>;
         citations?: Array<{ url?: string; title?: string }>;
         usage?: { input_tokens?: number };
       };
+      try {
+        d = JSON.parse(raw) as typeof d;
+      } catch {
+        // Parallel 偶发回纯文本（实测 2026-11-07 返回一段以 web_decisions 开头的说明）。
+        // 这是上游抖动，不是 criteria 形状错 —— 别把它说成用户参数问题。
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `判断失败：Parallel 这次没回结构化结果（服务端抖动，不是 criteria 写错，可直接重试）。\n` +
+                `原样返回：${raw.slice(0, 600)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
 
       const lines: string[] = [`## 判断：${params.state}`];
       for (const [name, a] of Object.entries(d.answers ?? {})) {
