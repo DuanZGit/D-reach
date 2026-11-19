@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -134,9 +135,32 @@ def unimplemented(reason):
     return {"state": "unavailable", "error": reason}
 
 
+def probe_zhihu():
+    """知乎开放平台：/api/v1/quota 一次拿到全部 9 项能力当日限免额度，不消耗业务额度。"""
+    k = key("ZHIHU_SEARCH_API_KEY")
+    if not k:
+        return {"state": "no_key"}
+    d = _get("https://developer.zhihu.com/api/v1/quota",
+             {"Authorization": f"Bearer {k}", "X-Request-Timestamp": str(int(time.time()))})
+    if d.get("Code") not in (0, None):
+        return {"state": "error", "error": f'{d.get("Code")}: {d.get("Message")}'}
+    items = [
+        {
+            "id": it.get("APIID"),
+            "name": it.get("APIName"),
+            "total": it.get("TotalQuota"),
+            "used": it.get("TotalUsed"),
+            "remaining": it.get("RemainingQuota"),
+        }
+        for it in (d.get("Data") or [])
+    ]
+    return {"state": "ok", "items": items, "source": "api:/api/v1/quota"}
+
+
 PROBES = {
     "firecrawl": probe_firecrawl,
     "tinyfish": probe_tinyfish,
+    "zhihu": probe_zhihu,
     "exa": lambda: unimplemented("官方 usage 接口需向 support 申请 access，默认不可用"),
     "jina_reader": lambda: unimplemented("只有 dashboard 看余额，没有公开额度 API"),
     "langsearch": lambda: unimplemented("官方只给 token 日额度，没有查询端点"),
@@ -200,6 +224,10 @@ def render(out, as_json=False):
                 lines.append(f"  {name:12s} ✅ 剩余 {rem}/{tot} credits{pct} 账期至 {str(v.get('period_end'))[:10]}")
             elif name == "tinyfish":
                 lines.append(f"  {name:12s} ✅ 钱包 {v.get('balance')} {v.get('currency')}（search/fetch 本身 $0）")
+            elif name == "zhihu":
+                parts = [f"{i.get('name')} {i.get('remaining')}/{i.get('total')}"
+                         for i in (v.get("items") or [])]
+                lines.append(f"  {name:12s} ✅ " + " · ".join(parts) + "（当日限免）")
             else:
                 lines.append(f"  {name:12s} ✅ {v.get('source')}")
         elif st == "no_key":

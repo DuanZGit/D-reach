@@ -49,8 +49,8 @@ const UA =
 const PROFILES = {
   auto: { label: "auto · 按场景选路", on: "" },
   quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
-  base: { label: "base · 20 路", on: "" },
-  deep: { label: "deep · 23 路", on: "" },
+  base: { label: "base · 21 路", on: "" },
+  deep: { label: "deep · 24 路", on: "" },
 } as const;
 
 type Profile = keyof typeof PROFILES;
@@ -146,6 +146,9 @@ const CHANNEL_MENU: [string, string][] = [
   ["hn", "Hacker News — 英文技术讨论"],
   ["jj", "掘金 — 中文技术社区"],
   ["zhihu", "知乎 — 站内经验帖、测评、避坑（官方 API，带赞同数）"],
+  ["zhihuall", "知乎全网搜索 — 中文全网（含非知乎站点），5000 次/日"],
+  ["zhihuhot", "知乎热榜 — 当下全站热点（与查询词无关，deep 档）"],
+  ["zhida", "知乎直答 — AI 摘要（非来源链接，deep 档）"],
   ["segfault", "SegmentFault — 中文报错排障"],
   ["oalex", "OpenAlex — 学术论文"],
   ["crossref", "学术 DOI"],
@@ -176,6 +179,8 @@ const ROUTE_PROMPT =
   "- 找开源项目/仓库/轮子 → gh 必选\n" +
   "- 问真实体验/值不值/避坑/种草/生活决策 → xhs + bili\n" +
   "- 知乎站内/经验帖/行业讨论 → zhihu\n" +
+  "- 中文全网通用搜索 → zhihuall（5000 次/日，含非知乎站点）\n" +
+  "- 今天有什么热点/全网热议 → zhihuhot\n" +
   "- 报错排障 → se + segfault + fcdev\n" +
   "- 中文通用/本地生活/政策 → qianfan + serper\n" +
   "- 概念定义/什么是X → wiki + qianfan\n" +
@@ -2115,7 +2120,7 @@ const searchTool = defineTool({
     "学术（论文/arxiv/survey）→ oalex,crossref,fcres；" +
     "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
     "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）。" +
-    "quick 固定 3 路；base 20 路；deep 23 路含限额通道。返回精简摘要，完整来源写到 details.file。",
+    "quick 固定 3 路；base 21 路；deep 24 路含限额通道。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
     profile: Type.Optional(
@@ -2128,7 +2133,7 @@ const searchTool = defineTool({
         ],
         {
           description:
-            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=20 路；deep=23 路",
+            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=21 路；deep=24 路",
         },
       ),
     ),
@@ -2451,7 +2456,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
     handler: (args, ctx) => runCommand(args, ctx, "auto"),
   });
   pi.registerCommand("reach-deep", {
-    description: "d-reach 检索（deep 23 路含限额通道）",
+    description: "d-reach 检索（deep 24 路含限额通道）",
     handler: (args, ctx) => runCommand(args, ctx, "deep"),
   });
 }

@@ -19,7 +19,7 @@
 #       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   se hn jj zhihu oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
+#   se hn jj zhihu zhihuall oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd zhihuhot zhida
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
@@ -74,7 +74,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj zhihu segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -462,6 +462,31 @@ f_zhihu() {   # 知乎开放平台站内搜索：需 ZHIHU_SEARCH_API_KEY（官�
     -H "X-Request-Timestamp: $(date +%s)" \
     -o "$TMP/zhihu.json" -w '%{http_code}' > "$TMP/zhihu.http" 2>/dev/null
 }
+f_zhihuall() {   # 知乎开放平台全网搜索：5000 次/日限免，中文全网（权威分级），需 ZHIHU_SEARCH_API_KEY
+  _zk=$(sh "$DIR/load_key.sh" ZHIHU_SEARCH_API_KEY https://developer.zhihu.com 2>/dev/null) || { echo "key" > "$TMP/skip.zhihuall"; return 1; }
+  curl -s --max-time 20 -G 'https://developer.zhihu.com/api/v1/content/global_search' \
+    --data-urlencode "Query=$Q" -d 'Count=8' \
+    -H "Authorization: Bearer $_zk" \
+    -H "X-Request-Timestamp: $(date +%s)" \
+    -o "$TMP/zhihuall.json" -w '%{http_code}' > "$TMP/zhihuall.http" 2>/dev/null
+}
+f_zhihuhot() {   # 知乎热榜：全站热点，与查询词无关（100 次/日限免），deep 档或 --on 时跑
+  _zk=$(sh "$DIR/load_key.sh" ZHIHU_SEARCH_API_KEY https://developer.zhihu.com 2>/dev/null) || { echo "key" > "$TMP/skip.zhihuhot"; return 1; }
+  curl -s --max-time 15 -G 'https://developer.zhihu.com/api/v1/content/hot_list' \
+    -d 'Limit=15' \
+    -H "Authorization: Bearer $_zk" \
+    -H "X-Request-Timestamp: $(date +%s)" \
+    -o "$TMP/zhihuhot.json" -w '%{http_code}' > "$TMP/zhihuhot.http" 2>/dev/null
+}
+f_zhida() {   # 知乎直答（OpenAI 兼容 /v1/chat/completions）：AI 摘要，非来源（100 次/日）
+  _zk=$(sh "$DIR/load_key.sh" ZHIHU_SEARCH_API_KEY https://developer.zhihu.com 2>/dev/null) || { echo "key" > "$TMP/skip.zhida"; return 1; }
+  _zbody=$(python3 -c 'import json,sys;print(json.dumps({"model":"zhida-fast-1p5","messages":[{"role":"user","content":sys.argv[1]}],"stream":False}))' "$Q")
+  curl -s --max-time 45 -X POST 'https://developer.zhihu.com/v1/chat/completions' \
+    -H "Authorization: Bearer $_zk" \
+    -H "X-Request-Timestamp: $(date +%s)" \
+    -H 'Content-Type: application/json' -d "$_zbody" \
+    -o "$TMP/zhida.json" -w '%{http_code}' > "$TMP/zhida.http" 2>/dev/null
+}
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
@@ -583,7 +608,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_zhihu f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
@@ -1016,8 +1041,9 @@ def r_anysearch():
                      trunc(body or it.get("snippet") or "", 120)))
     return rowify(rows)
 
-def r_zhihu():
-    d = load_json("zhihu.json")
+def _zhihu_rows(fname):
+    """知乎开放平台 zhihu_search / global_search 共用：Data.Items[] 同构。"""
+    d = load_json(fname)
     if d is None:
         return None
     code = d.get("Code")
@@ -1036,6 +1062,35 @@ def r_zhihu():
         rows.append((it.get("Title", ""), it.get("Url", ""),
                      meta + trunc(it.get("ContentText") or "", 100)))
     return rowify(rows)
+
+def r_zhihu():
+    return _zhihu_rows("zhihu.json")
+
+def r_zhihuall():
+    return _zhihu_rows("zhihuall.json")
+
+def r_zhihuhot():
+    d = load_json("zhihuhot.json")
+    if d is None:
+        return None
+    code = d.get("Code")
+    if code not in (0, None):
+        return ("ERR", trunc(f'{code}: {d.get("Message") or "hot_list error"}', 160))
+    items = (d.get("Data") or {}).get("Items") or []
+    return rowify([(it.get("Title", ""), it.get("Url", ""),
+                    trunc(it.get("Summary") or "", 100)) for it in items])
+
+def r_zhida():
+    """直答是 OpenAI 兼容对话：没有来源链接，返回纯文本（走 txt_only 分支）。"""
+    d = load_json("zhida.json")
+    if d is None:
+        return None
+    err = d.get("error")
+    if isinstance(err, dict):
+        return ("ERR", trunc(str(err.get("message") or err.get("code") or "zhida error"), 160))
+    ch = (d.get("choices") or [{}])[0]
+    txt = ((ch.get("message") or {}).get("content") or "").strip()
+    return txt or None
 
 def r_fcs():
     d = load_json("fcs.json")
@@ -1100,6 +1155,9 @@ SECTIONS = [
     ("hn",       "Hacker News（深技术讨论）", "免 Key 不限量", r_hn, False),
     ("jj",       "掘金（中文技术长尾）", "免 Key 不限量", r_jj, False),
     ("zhihu",    "知乎站内搜索（开放平台官方 API）", "需 ZHIHU_SEARCH_API_KEY；结果带赞同/评论数", r_zhihu, False),
+    ("zhihuall", "知乎全网搜索（开放平台官方 API）", "需 ZHIHU_SEARCH_API_KEY；5000 次/日，中文全网带权威分级", r_zhihuall, False),
+    ("zhihuhot", "知乎热榜（全站热点，与查询词无关）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhihuhot, True),
+    ("zhida",    "知乎直答（AI 摘要，非来源链接）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhida, True),
     ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
@@ -1239,7 +1297,7 @@ CH_W = {            # 通道权重：直接给正文的源比只给标题的高
     "langsearch": 0.9, "parallel": 0.9, "youcom": 0.9, "anysearch": 1.0,
     "oalex": 0.8, "crossref": 0.8, "se": 0.8,
     "hn": 0.7, "bd": 0.7,
-    "jj": 0.6, "wiki": 0.6, "segfault": 0.6, "zhihu": 0.8,
+    "jj": 0.6, "wiki": 0.6, "segfault": 0.6, "zhihu": 0.8, "zhihuall": 0.9, "zhihuhot": 0.4,
 }
 DW = 0.7
 

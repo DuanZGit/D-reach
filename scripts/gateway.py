@@ -1016,6 +1016,21 @@ def state():
         quota_rows.append({"svc": svc, "used": v.get("monthly", 0),
                            "limit": {"firecrawl": 1000, "exa": 2500, "brightdata": 5000, "serper": 2500}.get(svc, 0),
                            "official": s})
+    # 知乎开放平台：9 项能力各自独立日额度，不进本地计数（官方 /api/v1/quota 实时返回）
+    zh = official.get("zhihu") or {}
+    if zh.get("state") == "ok" and zh.get("items"):
+        its = {i.get("id"): i for i in zh["items"]}
+        parts = []
+        for aid, label in (("zhihu_search", "知乎搜索"), ("global_search", "全网搜索"),
+                           ("hot_list", "热榜"), ("zhida_openai", "直答"),
+                           ("question_discovery", "问题发现")):
+            it = its.get(aid)
+            if it:
+                parts.append(f'{label} {it.get("remaining")}/{it.get("total")}')
+        quota_rows.append({"svc": "zhihu",
+                           "used": sum(i.get("used") or 0 for i in zh["items"]),
+                           "limit": 0,
+                           "official": " · ".join(parts)})
     stamp = next((v.get("probed_at") for v in official.values() if v.get("probed_at")), None)
     return {"channels": chans, "quota": quota_rows, "official_at": stamp, "lan": LAN}
 
