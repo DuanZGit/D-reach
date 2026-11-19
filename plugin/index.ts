@@ -2361,6 +2361,7 @@ const quotaTool = defineTool({
         balance?: string;
         currency?: string;
         probed_at?: string;
+        items?: { id?: string; name?: string; remaining?: number; total?: number; used?: number }[];
       }
     >;
 
@@ -2409,6 +2410,14 @@ const quotaTool = defineTool({
       lines.push(`  ${svc}: 本月已用 ${used}${tail}`);
     }
     const stamp = Object.values(official)[0]?.probed_at;
+    // 知乎开放平台：9 项能力各自独立日额度，官方接口实时返回，不占限额通道
+    const zh = official.zhihu;
+    if (zh?.state === "ok" && zh.items?.length) {
+      lines.push("", "知乎开放平台（当日限免）：");
+      for (const it of zh.items) {
+        lines.push(`  ${it.name}: ${it.remaining}/${it.total}`);
+      }
+    }
     if (stamp)
       lines.push("", `官方数据时间：${stamp.slice(0, 16).replace("T", " ")}`);
     return {
