@@ -19,7 +19,7 @@
 #       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   se hn jj oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
+#   se hn jj zhihu oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
@@ -74,7 +74,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj zhihu segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -111,11 +111,13 @@ except Exception:
     h = {}
 now = datetime.now(timezone.utc)
 for k, v in h.items():
-    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+    if not isinstance(v, dict):
         continue
     until = v.get("suspend_until")
     if not until:
         continue                      # 没有到期时间 = 该放行一次，让 mark 补上退避
+    # 挂起现在按「失败性质」写：确定性结论（要登录/限流）首败就挂，
+    # 自愈类连败 3 次才挂 —— 所以这里只看有没有未到期的挂起，不再看连败次数。
     try:
         if datetime.fromisoformat(until) > now:
             bad.append(k)             # 还在挂起期内
@@ -235,6 +237,12 @@ f_bili() {   # B 站视频搜索（需登录态；冷却 90 秒）
 }
 
 f_se() {     # StackExchange 排障
+  # 中文 query（调用方没给 --en）打 SO 恒 0 命中：q 是全词 AND，中文词组在 SO 上
+  # 几乎无索引。实测 8 天里 23 轮中文 query 送去 se，全部 0 命中 → 直接跳过省 15s。
+  if [ "$CJK" = "1" ] && [ "$ENQ" = "$Q" ]; then
+    echo "cjk" > "$TMP/skip.se"
+    return 0
+  fi
   # q 是全词 AND 匹配：长句/长中文会 0 命中 → 只取前 5 个词
   # shellcheck disable=SC2086
   set -- $ENQ
@@ -245,6 +253,11 @@ f_se() {     # StackExchange 排障
     --data-urlencode "pagesize=5" -o "$TMP/se.json" -w '%{http_code}' > "$TMP/se.http" 2>/dev/null
 }
 f_hn() {     # HN 深技术讨论
+  # 同 f_se：HN 只认英文，中文 query 恒 0 命中（实测 8 天 6 次空转）
+  if [ "$CJK" = "1" ] && [ "$ENQ" = "$Q" ]; then
+    echo "cjk" > "$TMP/skip.hn"
+    return 0
+  fi
   curl -s --max-time 12 -G "https://hn.algolia.com/api/v1/search" \
     --data-urlencode "query=$ENQ" --data-urlencode "hitsPerPage=5" -o "$TMP/hn.json" -w '%{http_code}' > "$TMP/hn.http" 2>/dev/null
 }
@@ -440,6 +453,15 @@ print(json.dumps({"query":q,"max_results":6,"zone":z}))' "$Q")
       -d "$_abody" -o "$TMP/anysearch.json" -w '%{http_code}' > "$TMP/anysearch.http" 2>/dev/null
   fi
 }
+f_zhihu() {   # 知乎开放平台站内搜索：需 ZHIHU_SEARCH_API_KEY（官方 API，非爬虫）
+  # 返回标题/摘要/赞同数/评论数；免费额度按开放平台控制台发放规则。
+  _zk=$(sh "$DIR/load_key.sh" ZHIHU_SEARCH_API_KEY https://developer.zhihu.com 2>/dev/null) || { echo "key" > "$TMP/skip.zhihu"; return 1; }
+  curl -s --max-time 20 -G 'https://developer.zhihu.com/api/v1/content/zhihu_search' \
+    --data-urlencode "Query=$Q" -d "Count=8" \
+    -H "Authorization: Bearer $_zk" \
+    -H "X-Request-Timestamp: $(date +%s)" \
+    -o "$TMP/zhihu.json" -w '%{http_code}' > "$TMP/zhihu.http" 2>/dev/null
+}
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
@@ -561,7 +583,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_zhihu f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
@@ -572,6 +594,10 @@ wait
 # 本轮起始时间：给 history.jsonl 算耗时用（调用方已给就沿用，比如插件那边能算得更准）
 [ -n "${D_REACH_T0:-}" ] || D_REACH_T0=$(date +%s)
 export D_REACH_T0
+# 脚本指纹：通道的「这路坏了/要登录」结论绑定它。改了脚本旧结论自动作废，
+# 不用手删 channels.json（照 Agent-Reach 的 fingerprint 失效机制）。
+D_REACH_FP=$(md5sum "$DIR/fanout.sh" 2>/dev/null | cut -c1-8)
+export D_REACH_FP
 
 python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
 import json, os, re, sys, html, pathlib, time
@@ -990,6 +1016,27 @@ def r_anysearch():
                      trunc(body or it.get("snippet") or "", 120)))
     return rowify(rows)
 
+def r_zhihu():
+    d = load_json("zhihu.json")
+    if d is None:
+        return None
+    code = d.get("Code")
+    if code not in (0, None):
+        return ("ERR", trunc(f'{code}: {d.get("Message") or "zhihu error"}', 160))
+    data = d.get("Data") or {}
+    items = data.get("Items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return rowify(walk_generic(d))
+    rows = []
+    for it in items:
+        meta = f'[赞{it.get("VoteUpCount", 0)}·评{it.get("CommentCount", 0)}] '
+        ts = it.get("EditTime") or it.get("CreateTime")
+        if isinstance(ts, (int, float)) and ts > 0:
+            meta += time.strftime("%Y-%m-%d", time.localtime(ts)) + " "
+        rows.append((it.get("Title", ""), it.get("Url", ""),
+                     meta + trunc(it.get("ContentText") or "", 100)))
+    return rowify(rows)
+
 def r_fcs():
     d = load_json("fcs.json")
     if d is None:
@@ -1052,6 +1099,7 @@ SECTIONS = [
     ("se",       "StackExchange（报错排障）", "免 Key 不限量", r_se, False),
     ("hn",       "Hacker News（深技术讨论）", "免 Key 不限量", r_hn, False),
     ("jj",       "掘金（中文技术长尾）", "免 Key 不限量", r_jj, False),
+    ("zhihu",    "知乎站内搜索（开放平台官方 API）", "需 ZHIHU_SEARCH_API_KEY；结果带赞同/评论数", r_zhihu, False),
     ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
@@ -1118,32 +1166,66 @@ now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 # 取小值是为了「坏通道别永久静默」——挂起到期会自动重试一次，通了就清零。
 BACKOFF = [600, 1800, 7200]
 
-ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
-def mark(key, status):
-    """只记「连败几次 + 最后成败时间 + 挂起到期时间」。skip 不计失败，避免本轮没请求把通道判死。
+# 失败的「性质」决定要不要等它自己好。照 Agent-Reach 的错误码分层：
+#   自愈类（timeout/upstream/empty）—— 连败 3 次才进退避阶梯；
+#   确定性结论（登录墙/风控/凭据/限流/端点没了）—— 重试只会撞同一堵墙，
+#   首次就挂起，并且文案要说清「谁该出手」，而不是干巴巴一句「连败 N 次」。
+NEEDS = {
+    "login": "站点要登录：浏览器里登录过一次，或换公开来源",
+    "antibot": "撞了风控验证码：等几小时或换检索词",
+    "auth": "key 失效或被拒：换 key 后自动恢复",
+    "ratelimit": "平台限流：冷却窗口内不再打",
+    "notfound": "端点 404：脚本里的地址要更新",
+    "setup": "本机依赖不可用：先修依赖",
+}
+NEEDS_TITLE = {
+    "login": "要登录", "antibot": "要过验证码", "auth": "凭据失效",
+    "ratelimit": "限流中", "notfound": "端点失效", "setup": "依赖缺失",
+}
+NEEDS_TTL = 6 * 3600        # 确定性结论挂 6 小时，到期给一次自愈机会，不永久静默
+FP = os.environ.get("D_REACH_FP") or ""
 
-    连败 ≥3 次进挂起，退避 10 分钟 → 30 分钟 → 2 小时封顶（用户要求退避短一些）。
-    到期自动重试一次：成功清零、失败继续升级。这样通道不会「跳过→不跑→永不成功」死锁。
+# 脚本改过 → 旧的「这路坏了」结论可能已不成立，作废重测
+for _k, _v in health.items():
+    if isinstance(_v, dict) and _v.get("fp") and FP and _v["fp"] != FP:
+        for _f in ("suspend_until", "suspend_secs", "code", "streak_fail"):
+            _v.pop(_f, None)
+
+ROUND = []          # 本轮每路的结果，最后写进 history.jsonl
+def mark(key, status, code=None):
+    """记「失败性质 + 连败次数 + 成败时间 + 挂起到期」。skip 不计失败，避免本轮没请求把通道判死。
+
+    自愈类连败 ≥3 进退避：10 分钟 → 30 分钟 → 2 小时封顶；
+    确定性类（NEEDS）首次失败就挂 6 小时，并在输出里点名该做什么。
+    到期自动重试一次：成功清零、失败继续升级。通道不会「跳过→不跑→永不成功」死锁。
     """
     v = health.setdefault(key, {"streak_fail": 0})
     ROUND.append({"key": key, "status": status})
+    if FP:
+        v["fp"] = FP
     if status == "ok":
         v["streak_fail"] = 0
         v["last_ok"] = now_iso
-        v.pop("suspend_until", None)   # 成功即解除挂起
-        v.pop("suspend_secs", None)
+        for f in ("suspend_until", "suspend_secs", "code"):   # 成功即解除挂起
+            v.pop(f, None)
     elif status == "fail":
-        v["streak_fail"] = v.get("streak_fail", 0) + 1
         v["last_fail"] = now_iso
-        n = v["streak_fail"]
-        if n >= 3:
-            secs = BACKOFF[min(n - 3, len(BACKOFF) - 1)]
+        code = code or "upstream"
+        v["code"] = code
+        if code in NEEDS:
+            secs = NEEDS_TTL
+        else:
+            v["streak_fail"] = v.get("streak_fail", 0) + 1
+            n = v["streak_fail"]
+            secs = BACKOFF[min(n - 3, len(BACKOFF) - 1)] if n >= 3 else 0
+        if secs:
             v["suspend_until"] = (
                 datetime.now(timezone.utc) + timedelta(seconds=secs)
             ).isoformat(timespec="seconds")
             v["suspend_secs"] = secs
 
 total, okc, zero = 0, 0, 0
+txt_only = 0        # 只给 AI 摘要、没有来源链接的路数（千帆），不能算「有结果」
 
 # ---------- 跨源合并：先把每路输出缓冲住，最后统一排序 ----------
 # 同一 URL 在 3 个源都出现就重复 3 遍，读者得自己判可信度。SearXNG 的做法是全局合并：
@@ -1157,7 +1239,7 @@ CH_W = {            # 通道权重：直接给正文的源比只给标题的高
     "langsearch": 0.9, "parallel": 0.9, "youcom": 0.9, "anysearch": 1.0,
     "oalex": 0.8, "crossref": 0.8, "se": 0.8,
     "hn": 0.7, "bd": 0.7,
-    "jj": 0.6, "wiki": 0.6, "segfault": 0.6,
+    "jj": 0.6, "wiki": 0.6, "segfault": 0.6, "zhihu": 0.8,
 }
 DW = 0.7
 
@@ -1188,6 +1270,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "health":
         v = health.get(key) or {}
         bad = v.get("streak_fail", 0)
+        _code = v.get("code") or ""
         until = v.get("suspend_until")
         left = ""
         if until:
@@ -1197,7 +1280,11 @@ for key, name, note, fn, deep_only in SECTIONS:
                     left = f"，{int(delta // 60) + 1} 分钟后自动重试"
             except Exception:
                 pass
-        print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
+        if _code in NEEDS:
+            print(f"### 🔇 {name} —— {NEEDS_TITLE.get(_code, '通道异常')}，先不打了{left}"
+                  f"（{NEEDS[_code]}；`--force` 可强跑）\n")
+        else:
+            print(f"### 🔇 {name} —— 连续失败 {bad} 次，挂起中{left}（`--force` 可强跑）\n")
         skipped.append(key); mark(key, "skip")
         continue
     if skip == "key":
@@ -1209,8 +1296,9 @@ for key, name, note, fn, deep_only in SECTIONS:
         skipped.append(key); mark(key, "skip")
         continue
     if skip == "cjk":
-        print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（Crossref 对中文相关性差："
-              f"实测会返回「水质监测站 / 变电站 / 暖通」这类匹配上\"配置/安装\"字样的噪声）\n")
+        print(f"### 🔇 {name} —— 检测到中文 query，本轮自动跳过（这个通道只认英文词："
+              f"中文打过去恒 0 命中，或只匹配上\"配置/安装\"这类字面词返回噪声；"
+              f"调用方给出英文检索词就会自动放行）\n")
         skipped.append(key); mark(key, "skip")
         continue
     if skip and skip.startswith("cooldown:"):
@@ -1230,7 +1318,7 @@ for key, name, note, fn, deep_only in SECTIONS:
     if skip == "err":
         detail = load_text(key + ".txt") or ""
         print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
-        failed.append(key); mark(key, "fail")
+        failed.append(key); mark(key, "fail", "setup")
         continue
     try:
         rows = fn()
@@ -1239,20 +1327,28 @@ for key, name, note, fn, deep_only in SECTIONS:
         print(f"<!-- {key} 解析异常: {type(e).__name__}: {str(e)[:120]} -->", file=sys.stderr)
     code = http_code(key)
     if code and code not in ("200", "000") and (rows is None or rows == [] or isinstance(rows, tuple)):
-        print(f"### ⚠️ {name} —— HTTP {code}（参数/凭据/限流问题，不是「没搜到」）\n")
-        failed.append(key); mark(key, "fail")
+        # 状态码本身就是结论：429 是限流（再打更糟）、401/403 是凭据、404 是端点没了，
+        # 这三类都算确定性失败；5xx 才当上游抖动、靠退避自愈。
+        _cls = ("ratelimit" if code == "429" else
+                "auth" if code in ("401", "403") else
+                "notfound" if code == "404" else "upstream")
+        print(f"### ⚠️ {name} —— HTTP {code}（{NEEDS_TITLE.get(_cls, '上游异常')}，不是「没搜到」）\n")
+        failed.append(key); mark(key, "fail", _cls)
         continue
     if isinstance(rows, str):                      # 千帆文本
         body = rows.strip()
         if body:
-            okc += 1; mark(key, "ok")
+            okc += 1; txt_only += 1; mark(key, "ok")
             print(f"### 💬 {name}\n_{note}_\n\n{body[:1800]}\n")
         else:
-            print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail")
+            print(f"### ❌ {name} —— 无返回\n"); failed.append(key); mark(key, "fail", "empty")
     elif isinstance(rows, tuple):                  # ("ERR", msg)
-        print(f"### ⚠️ {name} —— {rows[1]}\n"); failed.append(key); mark(key, "fail")
+        _msg = str(rows[1])
+        _low = _msg.lower()
+        _cls = "timeout" if ("超时" in _msg or "timed out" in _low or "timeout" in _low) else "upstream"
+        print(f"### ⚠️ {name} —— {_msg}\n"); failed.append(key); mark(key, "fail", _cls)
     elif rows is None:
-        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(key); mark(key, "fail")
+        print(f"### ❌ {name} —— 通道无响应 / 超时\n"); failed.append(key); mark(key, "fail", "timeout")
     elif not rows:
         zero += 1; mark(key, "ok")
         print(f"### ⚪ {name} —— 通道正常，0 命中\n")
@@ -1326,24 +1422,37 @@ def _left(v):
     except Exception:
         return None
 
-weak = []
+weak, need = [], []
 _active_keys = {_s[0] for _s in SECTIONS}
 for k, v in health.items():
     if k not in _active_keys:      # 已从档位移除的通道（如 bd）不再报
         continue
-    if not isinstance(v, dict) or v.get("streak_fail", 0) < 3:
+    if not isinstance(v, dict):
         continue
     left = _left(v)
-    weak.append(
-        f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
-        else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
-    )
-print(f"---\n**汇总**：{okc} 路有结果，共 {total} 条来源"
+    _code = v.get("code") or ""
+    if _code in NEEDS:
+        # 确定性结论：不是「次数到了」，是「这条路需要人处理」，措辞必须不同
+        need.append(f"{k}（{NEEDS_TITLE.get(_code, '异常')}"
+                    + (f"，{left // 60 + 1} 分钟后重试" if left else "") + "）")
+    elif v.get("streak_fail", 0) >= 3:
+        weak.append(
+            f"{k}({v['streak_fail']} 连败，挂起 {left // 60 + 1} 分钟)" if left
+            else f"{k}({v['streak_fail']} 连败，已到期下次会重试)"
+        )
+_head = (
+    f"{okc - txt_only} 路有结果，共 {total} 条来源"
+    if total
+    else "0 条来源" + (f"（{txt_only} 路只给了 AI 摘要，没有来源链接）" if txt_only else "")
+)
+print(f"---\n**汇总**：{_head}"
       + (f"；{zero} 路 0 命中" if zero else "")
       + (f"；{len(failed)} 路失败（{ '、'.join(failed) }）" if failed else "")
       + (f"；{len(skipped)} 路跳过（{ '、'.join(skipped) }）" if skipped else "") + "。\n")
 if weak:
     print(f"**通道健康**：{'、'.join(weak)}。\n")
+if need:
+    print(f"**要你出手**：{'、'.join(need)}。\n")
 print("**下一步**：把上面冒出的人名/机构/版本号/术语回灌成第二轮（追深），"
       "再单独跑一轮反证（`<主题> 缺点/失败/不推荐/争议/vs 替代`）。"
       "要更全就 `fanout.sh \"<query>\" --deep`（追加 LangSearch / Exa / Firecrawl-Research）。")

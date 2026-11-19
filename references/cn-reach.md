@@ -115,7 +115,7 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 | V2EX | ❌ **搜索已退役**（2026-09-25：`/search?q=` 302→`/go/search`，返回「搜索引擎技术研究」节点帖子、与 query 无关 → 会给**假结果**） | 掘金 / SegmentFault |
 | 豆瓣 | ✅ `search.douban.com/book/subject_search?search_text=X`，结果在 `window.__DATA__` JSON | 书/影/音评分与短评 |
 | 微博 | 302（需登录） | browser_use |
-| 知乎 | 403（web + api 均被拦） | browser_use 交互，或千帆搜知乎快照 |
+| 知乎 | ✅ 开放平台 API（`zhihu` 通道，需 `ZHIHU_SEARCH_API_KEY`）；裸抓 web/api 仍 403 | `fanout.sh "词" --on zhihu` |
 
 ## 🟢 资讯 / 行业
 

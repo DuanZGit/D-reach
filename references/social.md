@@ -36,11 +36,12 @@ curl -s -A "$UA" "https://search.douban.com/book/subject_search?search_text=关�
 
 用途：书/影/音评分与短评（选书选片）。**注意豆瓣评分是社区主观值，不是事实源。**
 
-## 知乎 / 贴吧（⚠️ 反爬，需交互）
+## 知乎 / 贴吧
 
-`www.zhihu.com` 与 `www.zhihu.com/api/v4/search_v3` 均 **403**，`tieba.baidu.com` 亦 403。
-本环境无免 Key 通道 → 走 `browser_use`（navigate → wait_for_dom_stable → get_readable），
-或先用百度千帆搜"知乎 关键词"拿快照摘要。
+知乎站内搜索走 **`zhihu` 通道**（开放平台官方 API，`scripts/fanout.sh "<query>" --on zhihu`），
+返回标题/摘要/赞同数/评论数/发布时间，无需绕反爬。
+`www.zhihu.com` 裸抓与 `/api/v4/search_v3` 仍 **403**，只有直连页面时才需要 `browser_use`。
+`tieba.baidu.com` 仍 403 → 千帆快照或 browser_use。
 
 ## 微博
 
