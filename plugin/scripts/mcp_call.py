@@ -13,6 +13,7 @@ Parallel 的免费档三个工具都是「问一次答一次」，用不上那�
 失败: 打一行 `MCP_ERROR: ...` 到 stdout 并退出码 1（调用方按文本判失败，不必解析 stderr）
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -29,6 +30,10 @@ def _post(endpoint: str, body: dict, session: str | None) -> tuple[str, str | No
     req.add_header("Accept", "application/json, text/event-stream")
     # 有些 MCP 网关（You.com）会 403 掉 Python-urllib 的默认 UA
     req.add_header("User-Agent", "d-reach/1.0")
+    # 需要鉴权的 MCP 网关（腾讯元宝 WSA）走环境变量传 Bearer，别把 key 写进命令行
+    _auth = os.environ.get("MCP_AUTH", "")
+    if _auth:
+        req.add_header("Authorization", _auth)
     req.add_header("MCP-Protocol-Version", PROTO)
     if session:
         req.add_header("Mcp-Session-Id", session)

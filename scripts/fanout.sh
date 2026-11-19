@@ -74,7 +74,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch brave yuanbao gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -487,6 +487,27 @@ f_zhida() {   # 知乎直答（OpenAI 兼容 /v1/chat/completions）：AI 摘要
     -H 'Content-Type: application/json' -d "$_zbody" \
     -o "$TMP/zhida.json" -w '%{http_code}' > "$TMP/zhida.http" 2>/dev/null
 }
+f_brave() {   # Brave Search API：自有索引（不经 Google/Bing），每月 $5 免费 credits ≈ 1000 次
+  gate brave || return 0
+  _bk=$(sh "$DIR/load_key.sh" BRAVE_API_KEY https://api-dashboard.search.brave.com/app/keys 2>/dev/null) || { echo "key" > "$TMP/skip.brave"; return 1; }
+  curl -s --max-time 20 -G 'https://api.search.brave.com/res/v1/web/search' \
+    --data-urlencode "q=$Q" -d 'count=8' -d 'safesearch=moderate' \
+    -H "X-Subscription-Token: $_bk" -H 'Accept: application/json' \
+    -o "$TMP/brave.json" -w '%{http_code}' > "$TMP/brave.http" 2>/dev/null
+  [ "$(cat "$TMP/brave.http" 2>/dev/null)" = "200" ] && charge brave
+}
+f_yuanbao() {   # 腾讯元宝搜索（WSA）MCP：腾讯生态 + 全网，按量计费 14 元/千次起，deep 档才跑
+  gate yuanbao || return 0
+  _yk=$(sh "$DIR/load_key.sh" WSA_API_KEY https://console.cloud.tencent.com/wsapi 2>/dev/null) || { echo "key" > "$TMP/skip.yuanbao"; return 1; }
+  MCP_AUTH="Bearer $_yk" python3 "$DIR/mcp_call.py" 'https://api.wsa.cloud.tencent.com/Mcp' SearchPro \
+    "$(python3 -c 'import json,sys;print(json.dumps({"Query":sys.argv[1],"Cnt":10,"Mode":2}))' "$Q")" \
+    > "$TMP/yuanbao.json" 2>/dev/null
+  if [ "$(head -c 11 "$TMP/yuanbao.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
+    head -c 300 "$TMP/yuanbao.json" > "$TMP/skip.yuanbao"
+    : > "$TMP/yuanbao.json"
+  fi
+  charge yuanbao
+}
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
@@ -608,7 +629,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_xhs f_bili; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_brave f_yuanbao f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
@@ -1092,6 +1113,76 @@ def r_zhida():
     txt = ((ch.get("message") or {}).get("content") or "").strip()
     return txt or None
 
+def r_brave():
+    """Brave Web Search：web.results[] 里 title/url/description，description 是 1-2 句摘要。"""
+    d = load_json("brave.json")
+    if d is None:
+        return None
+    if d.get("error") or d.get("type") == "ErrorResponse":
+        msg = d.get("message") or (d.get("error") or {}).get("detail") or "brave error"
+        return ("ERR", trunc(str(msg), 160))
+    rows = []
+    for it in ((d.get("web") or {}).get("results") or []):
+        if not isinstance(it, dict):
+            continue
+        rows.append((it.get("title") or "", it.get("url") or "",
+                     it.get("description") or it.get("snippet") or ""))
+    return rowify(rows)
+
+def r_yuanbao():
+    """元宝搜索 WSA：MCP JSON-RPC，结果在 content[].text 内嵌 JSON 的 Results/results 里。"""
+    t = load_text("yuanbao.json")
+    if not t:
+        return None
+    r = None
+    if t.lstrip().startswith("{"):
+        try:
+            r = json.loads(t)
+        except Exception:
+            return None
+    else:
+        for line in t.splitlines():
+            if line.startswith("data:"):
+                dd = line[5:].strip()
+                if dd.startswith("{"):
+                    try:
+                        r = json.loads(dd)
+                    except Exception:
+                        r = None
+                    break
+    if not isinstance(r, dict):
+        return None
+    if r.get("error"):
+        e = r["error"]
+        return ("ERR", trunc(str(e.get("message") if isinstance(e, dict) else e), 160))
+    res = r.get("result") or {}
+    for block in (res.get("content") or []):
+        txt = block.get("text") if isinstance(block, dict) else None
+        if not txt:
+            continue
+        try:
+            inner = json.loads(txt)
+        except Exception:
+            continue
+        for key in ("Results", "results", "Pages", "pages", "Data", "data"):
+            v = inner.get(key) if isinstance(inner, dict) else None
+            if isinstance(v, list) and v:
+                rows = []
+                for it in v:
+                    if not isinstance(it, dict):
+                        continue
+                    rows.append((
+                        it.get("title") or it.get("Title") or it.get("name") or "",
+                        it.get("url") or it.get("Url") or it.get("link") or "",
+                        it.get("snippet") or it.get("summary") or it.get("Summary")
+                        or it.get("content") or it.get("passage") or ""))
+                if rows:
+                    return rowify(rows)
+        rows = rowify(walk_generic(inner))
+        if rows:
+            return rows
+    return rowify(walk_generic(res))
+
 def r_fcs():
     d = load_json("fcs.json")
     if d is None:
@@ -1158,6 +1249,8 @@ SECTIONS = [
     ("zhihuall", "知乎全网搜索（开放平台官方 API）", "需 ZHIHU_SEARCH_API_KEY；5000 次/日，中文全网带权威分级", r_zhihuall, False),
     ("zhihuhot", "知乎热榜（全站热点，与查询词无关）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhihuhot, True),
     ("zhida",    "知乎直答（AI 摘要，非来源链接）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhida, True),
+    ("brave",   "Brave Search（自有索引，不经 Google/Bing）", "需 BRAVE_API_KEY；每月 $5 免费 credits≈1000 次，用完自动停", r_brave, False),
+    ("yuanbao",  "腾讯元宝搜索（腾讯生态+全网，按量计费）", "需 WSA_API_KEY；14 元/千次起，deep 档才跑", r_yuanbao, True),
     ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
@@ -1298,6 +1391,7 @@ CH_W = {            # 通道权重：直接给正文的源比只给标题的高
     "oalex": 0.8, "crossref": 0.8, "se": 0.8,
     "hn": 0.7, "bd": 0.7,
     "jj": 0.6, "wiki": 0.6, "segfault": 0.6, "zhihu": 0.8, "zhihuall": 0.9, "zhihuhot": 0.4,
+    "brave": 1.0, "yuanbao": 1.0,
 }
 DW = 0.7
 

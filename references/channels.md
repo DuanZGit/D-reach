@@ -88,6 +88,18 @@
 - **小工具**（10/日）：PDF 解析、PPT 生成。
 - 额度统一查：`GET https://developer.zhihu.com/api/v1/quota`（不消耗额度），已接进 `scripts/quota_probe.py`，`d_reach_quota` 与网关面板能看到全部 9 项。
 
+### `brave` Brave Search · 自有索引（base 档）
+- **擅长**：**自有索引，不经 Google/Bing**（这两家已关停或限制搜索 API），长尾查询不会被转手给第三方；英文网页质量高，实测中文也能用。AIMultiple 独立评测 agent 质量第一（14.89）。
+- **不擅长**：中文社区内容（知乎/小红书/B站仍要原生通道）。
+- **代价**：需 `BRAVE_API_KEY`；每月 $5 免费 credits = **1,000 次/月**（$5/1,000 requests），用完 429，`quota.py` 记 `brave` 月度 1000 上限后自动 gate 停掉。50 qps。
+- **端点**：`GET https://api.search.brave.com/res/v1/web/search?q=&count=8`，Header `X-Subscription-Token`。另有 Answers（$4/千次 + token 费）和 LLM Context 端点，未接。
+
+### `yuanbao` 腾讯元宝搜索 WSA · deep 档
+- **擅长**：腾讯生态（腾讯新闻、搜狗百科、企鹅号）+ 全网，分钟级更新，垂直权威信源（天气/金价/股价/汇率）可单独取；中文时效信息强。
+- **不擅长**：英文；结果条数只有 10/20/30/40/50 五档。
+- **代价**：**按量计费、无固定免费额度** —— 极速版 14 / 标准版 20 / 旗舰版 26 元每千次（日结）；资源包 5 万次 950 元/年。免费额度只在腾讯云活动专区按活动规则发放（登录 `console.cloud.tencent.com/wsapi/activity` 查）。故放 deep 档，只在主动深挖时跑。
+- **端点**：MCP JSON-RPC `POST https://api.wsa.cloud.tencent.com/Mcp`，Header `Authorization: Bearer <WSA_API_KEY>`，工具 `SearchPro`（`Query`/`Site`/`Mode` 0公开网页|1垂直权威|2混合/`Freshness` d7·m3·y1/`Cnt`/`Industry`）。`mcp_call.py` 已支持 `MCP_AUTH` 环境变量传 Bearer。
+
 ### `segfault` SegmentFault · 中文技术长尾
 - **擅长**：中文技术问答，偏后端/运维。
 - **不擅长**：同上，**只对技术有用**；内容比掘金更旧，很多答案停在 2020 年。
@@ -195,7 +207,7 @@
 工具输出开头会写「**未命中已知场景**」，并列出通道菜单。这时：
 
 1. 看问题本质属于上面哪一行，用 `channels` 指定；
-2. 实在判断不了，`profile=base`（21 路，12 路完全免 key）比 `deep`（24 路含限额）划算；
+2. 实在判断不了，`profile=base`（22 路，12 路完全免 key）比 `deep`（28 路含限额）划算；
 3. 只有确认免费通道拿不到，才上 `bd`（`serper` 通常已经够，且快 5 倍）。
 
 ## 五、已验证不可用（别再重复踩）
