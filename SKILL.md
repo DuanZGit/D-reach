@@ -43,7 +43,7 @@ upstream:
 >
 > **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
 > 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：28 条路里 22 路走默认档（其中 12 路**完全免 key**：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh；知乎 4 路（站内/全网/热榜/直答）走开放平台官方 API，同一个 key，日限 5000/5000/100/100；xhs / bili 需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、3 路限额通道月余量 >96%
+> 理由很直白：27 条路里 22 路走默认档（其中 12 路**完全免 key**：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh；知乎 4 路（站内/全网/热榜/直答）走开放平台官方 API，同一个 key，日限 5000/5000/100/100；xhs / bili 需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、3 路限额通道月余量 >96%
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 >
@@ -164,7 +164,7 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | LangSearch | `LANGSEARCH_API_KEY` | langsearch.com |
 | 知乎开放平台（站内搜索 / 全网搜索 / 热榜 / 直答，**同一个 key**） | `ZHIHU_SEARCH_API_KEY` | developer.zhihu.com（个人中心新建 Access Secret；日限免 知乎搜索 5000 / 全网 5000 / 热榜 100 / 直答 100 / 问题发现 100 / 知识库 500 / 创作 500 / 小工具 10 / 用户数据 10000） |
 | Brave Search（fanout 已接，base 档） | `BRAVE_API_KEY` | api-dashboard.search.brave.com/app/keys（每月 $5 免费 credits = 1,000 次；$5/1,000 requests，50 qps） |
-| 腾讯元宝搜索 WSA（fanout 已接，deep 档） | `WSA_API_KEY` | console.cloud.tencent.com/wsapi（开通服务后建 API KEY；按量 极速版 14 / 标准版 20 / 旗舰版 26 元每千次，**无固定免费额度**，免费只在活动专区按活动规则发） |
+| ~~腾讯元宝搜索 WSA~~ | 已弃用（2026-11-22 移除，按量计费且从未配 key） | — |
 
 > Wikipedia 不需要 key，完全免费无限量；Firecrawl /search 复用 `FIRECRAWL_API_KEY`，消耗同一份 credits。
 
@@ -192,7 +192,7 @@ URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段�
 
 ```bash
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：22 路并发（~5s，12 路完全免 key）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/知乎热榜/直答（~20s，28 路）
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/知乎热榜/直答（~20s，27 路）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --force       # 忽略健康状态强跑（复检用）

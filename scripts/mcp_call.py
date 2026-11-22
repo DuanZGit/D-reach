@@ -30,7 +30,7 @@ def _post(endpoint: str, body: dict, session: str | None) -> tuple[str, str | No
     req.add_header("Accept", "application/json, text/event-stream")
     # 有些 MCP 网关（You.com）会 403 掉 Python-urllib 的默认 UA
     req.add_header("User-Agent", "d-reach/1.0")
-    # 需要鉴权的 MCP 网关（腾讯元宝 WSA）走环境变量传 Bearer，别把 key 写进命令行
+    # 需要鉴权的 MCP 网关（如 TinyFish）走环境变量传 Bearer，别把 key 写进命令行
     _auth = os.environ.get("MCP_AUTH", "")
     if _auth:
         req.add_header("Authorization", _auth)

@@ -2,7 +2,7 @@
 # fanout.sh —— d-reach 并行铺开器（「全加全扩」落地件）
 #
 # 一条命令并发 9 路免费免 Key 通道；--deep 追加 LangSearch / Exa /
-# Firecrawl-Research / BrightData-Google / V2EX。
+# Firecrawl-Research / 知乎热榜·直答。
 # 轮 1 发现一律走它，别一条一条串行试：
 #   实测 3 路串行 2.95s vs 并行 1.30s —— 铺开耗时 ≈ 最慢一路，与路数基本无关。
 #
@@ -19,7 +19,7 @@
 #       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   se hn jj zhihu zhihuall oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres bd zhihuhot zhida
+#   se hn jj zhihu zhihuall oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres zhihuhot zhida
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
@@ -74,7 +74,7 @@ if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on c
 
 # --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
 if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch brave yuanbao gh xhs bili"
+    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch brave gh xhs bili"
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
@@ -496,18 +496,6 @@ f_brave() {   # Brave Search API：自有索引（不经 Google/Bing），每月
     -o "$TMP/brave.json" -w '%{http_code}' > "$TMP/brave.http" 2>/dev/null
   [ "$(cat "$TMP/brave.http" 2>/dev/null)" = "200" ] && charge brave
 }
-f_yuanbao() {   # 腾讯元宝搜索（WSA）MCP：腾讯生态 + 全网，按量计费 14 元/千次起，deep 档才跑
-  gate yuanbao || return 0
-  _yk=$(sh "$DIR/load_key.sh" WSA_API_KEY https://console.cloud.tencent.com/wsapi 2>/dev/null) || { echo "key" > "$TMP/skip.yuanbao"; return 1; }
-  MCP_AUTH="Bearer $_yk" python3 "$DIR/mcp_call.py" 'https://api.wsa.cloud.tencent.com/Mcp' SearchPro \
-    "$(python3 -c 'import json,sys;print(json.dumps({"Query":sys.argv[1],"Cnt":10,"Mode":2}))' "$Q")" \
-    > "$TMP/yuanbao.json" 2>/dev/null
-  if [ "$(head -c 11 "$TMP/yuanbao.json" 2>/dev/null)" = "MCP_ERROR: " ]; then
-    head -c 300 "$TMP/yuanbao.json" > "$TMP/skip.yuanbao"
-    : > "$TMP/yuanbao.json"
-  fi
-  charge yuanbao
-}
 f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
   gate firecrawl_search || return 0
   curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
@@ -599,18 +587,6 @@ PYPICK
     fi
   fi
 }
-f_bd() {  # ⚠️ 已从档位移除（2026-11-04）：Google 搜索实测 31.4s，超过 25s 硬超时必然失败；
-           # Serper 已覆盖同一需求且快 17 倍。要恢复：加回 467 行 deep 循环 + 恢复 SECTIONS 条目。
-  gate brightdata || return 0
-  # ⚠️ format 是必填（漏了返 400 validation）—— scrub.md 示例就是 format+data_format 两个都给
-  # ⚠️ 超时压到 25s：c2 实测 5 次调用 1×400(漏format)/1×500/2×50s 超时，而它是 deep 里最不
-  #    稳定的一路，一次超时就把整轮从 ~12s 拖到 50s+。要么快回，要么让位。
-  curl -s --max-time 25 -X POST "https://api.brightdata.com/request" \
-    -H "Authorization: Bearer $BD_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys,os,urllib.parse;print(json.dumps({"zone":os.environ.get("BRIGHTDATA_ZONE","mcp_unlocker"),"format":"raw","data_format":"parsed_light","url":"https://www.google.com/search?q="+urllib.parse.quote(sys.argv[1])+"&num=10&gl=cn"}))' "$Q")" \
-    -o "$TMP/bd.json" -w '%{http_code}' > "$TMP/bd.http" 2>/dev/null
-  [ "$(cat "$TMP/bd.http" 2>/dev/null)" = "200" ] && charge brightdata
-}
 # 已退役通道（2026-09-25 实测，别往回加）：
 #   · V2EX /search?q= —— 302 → /go/search，返回「搜索引擎技术研究」节点帖子，与 query 无关
 #     （会给假结果；假结果比无响应更毒，故整路移除）
@@ -629,7 +605,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   fi
   ( "$fn" ) &
 }
-for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_brave f_yuanbao f_xhs f_bili; do launch "$fn"; done
+for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_brave f_xhs f_bili; do launch "$fn"; done
 # --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
@@ -1129,60 +1105,6 @@ def r_brave():
                      it.get("description") or it.get("snippet") or ""))
     return rowify(rows)
 
-def r_yuanbao():
-    """元宝搜索 WSA：MCP JSON-RPC，结果在 content[].text 内嵌 JSON 的 Results/results 里。"""
-    t = load_text("yuanbao.json")
-    if not t:
-        return None
-    r = None
-    if t.lstrip().startswith("{"):
-        try:
-            r = json.loads(t)
-        except Exception:
-            return None
-    else:
-        for line in t.splitlines():
-            if line.startswith("data:"):
-                dd = line[5:].strip()
-                if dd.startswith("{"):
-                    try:
-                        r = json.loads(dd)
-                    except Exception:
-                        r = None
-                    break
-    if not isinstance(r, dict):
-        return None
-    if r.get("error"):
-        e = r["error"]
-        return ("ERR", trunc(str(e.get("message") if isinstance(e, dict) else e), 160))
-    res = r.get("result") or {}
-    for block in (res.get("content") or []):
-        txt = block.get("text") if isinstance(block, dict) else None
-        if not txt:
-            continue
-        try:
-            inner = json.loads(txt)
-        except Exception:
-            continue
-        for key in ("Results", "results", "Pages", "pages", "Data", "data"):
-            v = inner.get(key) if isinstance(inner, dict) else None
-            if isinstance(v, list) and v:
-                rows = []
-                for it in v:
-                    if not isinstance(it, dict):
-                        continue
-                    rows.append((
-                        it.get("title") or it.get("Title") or it.get("name") or "",
-                        it.get("url") or it.get("Url") or it.get("link") or "",
-                        it.get("snippet") or it.get("summary") or it.get("Summary")
-                        or it.get("content") or it.get("passage") or ""))
-                if rows:
-                    return rowify(rows)
-        rows = rowify(walk_generic(inner))
-        if rows:
-            return rows
-    return rowify(walk_generic(res))
-
 def r_fcs():
     d = load_json("fcs.json")
     if d is None:
@@ -1229,12 +1151,6 @@ def r_fcres():
         return rowify(out)
     return rowify(walk_generic(d))
 
-def r_bd():
-    d = load_json("bd.json")
-    if d is None:
-        return None
-    return rowify(walk_generic(d))
-
 # (key, 通道名, 说明, 解析函数, 仅 deep)
 SECTIONS = [
     ("qianfan",  "百度千帆（生成式综合答案）",
@@ -1250,7 +1166,6 @@ SECTIONS = [
     ("zhihuhot", "知乎热榜（全站热点，与查询词无关）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhihuhot, True),
     ("zhida",    "知乎直答（AI 摘要，非来源链接）", "需 ZHIHU_SEARCH_API_KEY；100 次/日，deep 档才跑", r_zhida, True),
     ("brave",   "Brave Search（自有索引，不经 Google/Bing）", "需 BRAVE_API_KEY；每月 $5 免费 credits≈1000 次，用完自动停", r_brave, False),
-    ("yuanbao",  "腾讯元宝搜索（腾讯生态+全网，按量计费）", "需 WSA_API_KEY；14 元/千次起，deep 档才跑", r_yuanbao, True),
     ("segfault", "SegmentFault（中文技术长尾）", "免 Key 不限量", r_segfault, False),
     ("oalex",    "OpenAlex（学术 2.5 亿篇）", "免 Key 不限量", r_oalex, False),
     ("crossref", "Crossref（DOI 权威元数据）", "免 Key 不限量", r_crossref, False),
@@ -1269,7 +1184,7 @@ SECTIONS = [
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "bd": "brightdata", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
 
 def read_skip(key):
     for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
@@ -1389,9 +1304,9 @@ CH_W = {            # 通道权重：直接给正文的源比只给标题的高
     "exa": 1.0, "qianfan": 1.0, "fcres": 1.0,
     "langsearch": 0.9, "parallel": 0.9, "youcom": 0.9, "anysearch": 1.0,
     "oalex": 0.8, "crossref": 0.8, "se": 0.8,
-    "hn": 0.7, "bd": 0.7,
+    "hn": 0.7,
     "jj": 0.6, "wiki": 0.6, "segfault": 0.6, "zhihu": 0.8, "zhihuall": 0.9, "zhihuhot": 0.4,
-    "brave": 1.0, "yuanbao": 1.0,
+    "brave": 1.0,
 }
 DW = 0.7
 
