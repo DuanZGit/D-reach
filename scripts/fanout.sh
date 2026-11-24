@@ -1,70 +1,67 @@
 #!/usr/bin/env bash
 # fanout.sh —— d-reach 并行铺开器（「全加全扩」落地件）
 #
-# 一条命令并发 9 路免费免 Key 通道；--deep 追加 LangSearch / Exa /
-# Firecrawl-Research / 知乎热榜·直答。
+# 一条命令并发运行启用清单里的通道；--deep 追加 enabledForDeep 清单里的 deep 通道。
 # 轮 1 发现一律走它，别一条一条串行试：
 #   实测 3 路串行 2.95s vs 并行 1.30s —— 铺开耗时 ≈ 最慢一路，与路数基本无关。
 #
 # 用法:
-#   fanout.sh "<query>"              # 默认档：9 路免费通道（含中文/英文/学术/排障/长尾）
-#   fanout.sh "<query>" --deep       # 深调研：追加 5 路付费/限 token 通道
+#   fanout.sh "<query>"              # 运行 enabledByDefault 正向清单
+#   fanout.sh "<query>" --deep       # 追加 enabledForDeep 清单
 #   fanout.sh "<query>" --n 8        # 每路最多列几条（默认 5）
-#   fanout.sh "<query>" --on bing,hn,oalex   # 只跑指定通道（见下方 CHANNELS）
-#   fanout.sh --list                 # 列出通道名
+#   fanout.sh "<query>" --on hn,oalex # 本轮白名单
+#   fanout.sh --list                 # 列出通道与默认启用状态
+#   fanout.sh --list --json          # 插件和网关共用的机器可读路由信息
+# 默认清单：~/.agent-reach/fanout-defaults.json；D_REACH_DEFAULTS_FILE 可覆盖路径。
 #
-# 记账: 免费免 Key 通道不记账；deep 下 LangSearch/Exa/BrightData 调用前自动
+# 记账: 免费免 Key 通道不记账；deep 下 LangSearch/Exa 调用前自动
 #       `quota.py use`，退出码 1（越免费线）→ 自动跳过该路并在输出里标注，
 #       不拖死其他路。百度千帆由它自己的计数器记账，这里不双扣。
 #       tf（TinyFish）需 TINYFISH_API_KEY 但 search $0.00/次 → 只 gate key 不记账。
 #
 # 通道命名（--on 用）:
-#   se hn jj zhihu zhihuall oalex crossref segfault fcdev qianfan tf | deep: langsearch exa fcres zhihuhot zhida
+#   se hn jj zhihu zhihuall oalex crossref segfault fcdev qianfan tf xhs bili | deep: langsearch exa fcres zhihuhot zhida
 #
 # 已退役通道（别往回加）：
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
 #   · V2EX search —— /search?q= 302→/go/search，返回节点帖子列表、与 query 无关（假结果）
-#   中文社区长尾现在靠 掘金 + SegmentFault + cn.bing 站内。
+#   中文社区长尾现在靠 掘金 + SegmentFault + 知乎。
 
 set -u
 
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 QUOTA="$DIR/quota.py"
+DEFAULTS_FILE="${D_REACH_DEFAULTS_FILE:-$HOME/.agent-reach/fanout-defaults.json}"
 SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills
 # 千帆配套技能目录名有两版：历史/本机 baiduaisearchwithquota，viking 分发版按 slug 落成
-# baidu-ai-search。两个都探，先命中先用；都没有时只让 qianfan 这一路报错，其余照跑。
+# baidu-ai-search。两个都探，先命中先用；都没有时 qianfan 标记未配置并跳过。
 BAIDU=""
 for _bd in "$SKILLS/baiduaisearchwithquota/scripts" "$SKILLS/baidu-ai-search/scripts"; do
   [ -f "$_bd/smart_search.py" ] && { BAIDU="$_bd"; break; }
 done
 [ -n "$BAIDU" ] || BAIDU="$SKILLS/baiduaisearchwithquota/scripts"
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+BASE_CHANNELS="qianfan gh fcdev se hn jj zhihu zhihuall brave segfault oalex crossref tf serper tavily parallel youcom anysearch fcs wiki xhs bili"
+DEEP_CHANNELS="zhihuhot zhida langsearch exa fcres"
+KNOWN="$BASE_CHANNELS $DEEP_CHANNELS"
 
 # ---------- 参数 ----------
-Q=""; ENQ=""; DEEP=0; N=5; ON=""; FORCE=0
+Q=""; ENQ=""; DEEP=0; N=5; ON=""; DEFAULT_DISABLED=""; ON_SET=0; FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1 ;;
     --n) shift; N="${1:-5}" ;;
-    --on) shift; ON="${1:-}" ;;
+    --on) shift; ON="${1:-}"; ON_SET=1 ;;
     --en) shift; ENQ="${1:-}" ;;   # 英文检索词：LLM 把中文 query 译好后传进来，英文通道用它
     --force) FORCE=1 ;;   # 忽略健康状态，强制跑（调试/复检用）
-    --list) python3 - "$0" <<'PY'
-import re, sys
-src = open(sys.argv[1], encoding='utf-8').read()
-body = src.split('SECTIONS = [', 1)[1].split('\n]', 1)[0]
-for entry in re.split(r'\n(?=    \()', body):
-    m = re.match(r'\s*\("([a-z]+)",\s*"([^"]+)"', entry)
-    if not m:
-        continue
-    d = re.search(r',\s*(True|False)\s*\)', entry)
-    deep = bool(d and d.group(1) == 'True')
-    key, name = m.groups()
-    print(f"  {key:10s} {'deep' if deep else 'base':4s}  {name}")
-print("\n  用法: fanout.sh \"<query>\" [--deep] [--n N] [--on key1,key2] [--en \"<english>\"]")
-PY
-      exit 0 ;;
+    --list)
+      format=table
+      [ "${2:-}" = "--json" ] && format=json
+      python3 "$DIR/route_config.py" --script "$0" --defaults "$DEFAULTS_FILE" \
+        --base "$BASE_CHANNELS" --deep "$DEEP_CHANNELS" --format "$format"
+      exit $? ;;
     -h|--help) sed -n '2,30p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --*) echo "[fanout] 未知参数：$1" >&2; exit 2 ;;
     *) [ -z "$Q" ] && Q="$1" ;;
   esac
   shift
@@ -72,27 +69,50 @@ done
 ENQ="${ENQ:-$Q}"   # 没给 --en 时英文通道退回原 query，行为与改动前一致
 if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans] [--en \"<english>\"]"; exit 2; fi
 
-# --on 拼写校验：静默全跑比报错更坑（本想只跑 2 路，结果震了 10 路还扣额度）
-if [ -n "$ON" ]; then
-    KNOWN="qianfan fcdev se hn jj zhihu zhihuall zhihuhot zhida segfault oalex crossref tf langsearch exa fcres serper fcs wiki tavily parallel youcom anysearch brave gh xhs bili"
+DEFAULT_LISTS=$(python3 "$DIR/route_config.py" --script "$0" --defaults "$DEFAULTS_FILE" \
+  --base "$BASE_CHANNELS" --deep "$DEEP_CHANNELS" --format lists) \
+  || { echo "[fanout] 默认启用配置无法读取或格式错误：$DEFAULTS_FILE" >&2; exit 2; }
+DEFAULT_LISTS_BASE="${DEFAULT_LISTS%%|*}"
+DEFAULT_LISTS_DEEP="${DEFAULT_LISTS#*|}"
+
+# --on 是本轮白名单；未知项剔除，若没有有效项则报错，避免意外跑全量。
+if [ "$ON_SET" = "1" ]; then
+  [ -n "$ON" ] || { echo "[fanout] --on 需要通道名" >&2; exit 2; }
   _bad=""; _good=""
   for _c in $(echo "$ON" | tr ',' ' '); do
     case " $KNOWN " in *" $_c "*) _good="$_good,$_c" ;; *) _bad="$_bad $_c" ;; esac
   done
-  # 猜错通道名不该报废整轮检索：剔掉不认识的继续跑（模型经常把抓取档当搜索通道，
-  # 比如 --on tf,jina —— jina 是抓取档不是搜索通道）。全都不认识就退回默认档。
   if [ -n "$_bad" ]; then
-    echo "[fanout] 忽略未知通道:$_bad（可用: $KNOWN）" >&2
-    ON="${_good#,}"
-    [ -z "$ON" ] && echo "[fanout] 全部不认识，改跑默认档" >&2
+    echo "[fanout] 忽略未知 --on 通道:$_bad（可用: $KNOWN）" >&2
   fi
+  ON="${_good#,}"
+  [ -n "$ON" ] || { echo "[fanout] --on 没有匹配到可用通道" >&2; exit 2; }
 fi
 case "$N" in ''|*[!0-9]*) echo "[fanout] --n 必须是正整数" >&2; exit 2 ;; esac
 
 # --on 里点名了 deep 专属通道 → 自动按 deep 跑（省得再写一遍 --deep）
 case ",$ON," in
-  *,langsearch,*|*,exa,*|*,fcres,*|*,bd,*) DEEP=1 ;;
+  *,langsearch,*|*,exa,*|*,fcres,*|*,zhihuhot,*|*,zhida,*) DEEP=1 ;;
 esac
+
+# Default runs use the positive allowlist; --on supplies a one-call override.
+if [ "$ON_SET" != "1" ]; then
+  _default_scope="$BASE_CHANNELS"
+  _default_active="$DEFAULT_LISTS_BASE"
+  if [ "$DEEP" = "1" ]; then
+    _default_scope="$BASE_CHANNELS $DEEP_CHANNELS"
+    _default_active="${DEFAULT_LISTS_BASE:+$DEFAULT_LISTS_BASE,}$DEFAULT_LISTS_DEEP"
+  fi
+  _defaults_disabled=""
+  for _c in $(echo "$_default_scope" | tr ' ' '\n'); do
+    case ",$_default_active," in
+      *,"$_c",*) ;;
+      *) _defaults_disabled="$_defaults_disabled,$_c" ;;
+    esac
+  done
+  _defaults_disabled="${_defaults_disabled#,}"
+  DEFAULT_DISABLED="$_defaults_disabled"
+fi
 
 # CJK 检测：Crossref / OpenAlex 对中文 query 相关性差（c2 实测：中文 query 返回「水质监测站 /
 # 变电站 / 暖通」这类匹配到"配置/安装"字样的噪声）→ 中文 query 时自动跳过 Crossref
@@ -168,7 +188,15 @@ gate() {
 charge() {
   python3 "$QUOTA" use "$1" >/dev/null 2>&1 || true
 }
-want() { [ -z "$ON" ] && return 0; case ",$ON," in *",$1,"*) return 0;; esac; return 1; }
+want() {
+  local channel="$1"
+  if [ "$ON_SET" = "1" ]; then
+    case ",$ON," in *",$channel,"*) ;; *) return 1 ;; esac
+  fi
+  case " $DEEP_CHANNELS " in *" $channel "*) [ "$DEEP" = "1" ] || return 1 ;; esac
+  case ",$DEFAULT_DISABLED," in *",$channel,"*) return 1 ;; esac
+  return 0
+}
 
 # ---------- 免费免 Key 通道 ----------
 f_gh() {     # GitHub 仓库搜索（免 key，10 次/分钟）
@@ -187,8 +215,7 @@ f_gh() {     # GitHub 仓库搜索（免 key，10 次/分钟）
     -o "$TMP/gh.json" -w '%{http_code}' > "$TMP/gh.http" 2>/dev/null
 }
 
-# 需要 cookie 的社交通道：连打必触发风控（小红书实测几次就 type=217 验证码），
-# 所以设最小调用间隔，冷却期内直接跳过而不是硬撞。
+# 登录态社交通道按平台使用独立冷却；冷却期内跳过，减少连续请求触发风控。
 social_gate() {   # $1=平台 $2=冷却秒数；0=放行，1=冷却中（stdout 给剩余分钟）
   python3 - "$HOME/.agent-reach/social-last.json" "$1" "$2" <<'PY'
 import json, os, sys, time
@@ -207,13 +234,46 @@ json.dump(d, open(f, "w"))
 PY
 }
 
-f_xhs() {    # 小红书（需登录态 cookie；冷却 2 分钟）
-  local left
-  left=$(social_gate xhs 120) || { echo "cooldown:$left" > "$TMP/skip.xhs"; return; }
-  timeout 22 xhs search "$Q" --json > "$TMP/xhs.json" 2>/dev/null
-  # 风控验证码不是通道坏了，别计入连败把通道判死。先判 captcha 再看退出码。
-  if grep -q 'verification_required\|aptcha' "$TMP/xhs.json" 2>/dev/null; then
-    echo captcha > "$TMP/skip.xhs"; rm -f "$TMP/xhs.json"; return
+run_command_with_timeout() {
+  local seconds="$1" output="$2" error="$3"
+  shift 3
+  python3 -c '
+import subprocess, sys
+seconds, output, error = float(sys.argv[1]), sys.argv[2], sys.argv[3]
+with open(output, "wb") as out, open(error, "wb") as err:
+    try:
+        result = subprocess.run(sys.argv[4:], stdout=out, stderr=err, timeout=seconds)
+    except subprocess.TimeoutExpired:
+        sys.exit(124)
+sys.exit(result.returncode)
+' "$seconds" "$output" "$error" "$@"
+}
+
+f_xhs() {    # 国内版小红书（需 xhs CLI 登录态；冷却 2 分钟）
+  local left rc
+  command -v xhs >/dev/null 2>&1 || {
+    echo "not-configured" > "$TMP/skip.xhs"
+    echo "未安装可选依赖 xhs CLI，国内版 XHS 路线已跳过。" > "$TMP/xhs.txt"
+    return 0
+  }
+  left=$(social_gate xhs 120) || { echo "cooldown:$left" > "$TMP/skip.xhs"; return 0; }
+  if timeout 22 xhs search "$Q" --json > "$TMP/xhs.json" 2> "$TMP/xhs.err"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if grep -qi 'verification_required\|captcha' "$TMP/xhs.json" "$TMP/xhs.err" 2>/dev/null; then
+    echo captcha > "$TMP/skip.xhs"
+    rm -f "$TMP/xhs.json" "$TMP/xhs.err"
+    return 0
+  fi
+  if [ "$rc" != "0" ]; then
+    echo err > "$TMP/skip.xhs"
+    if [ "$rc" = "124" ]; then
+      echo "国内版 XHS 搜索超时（22 秒）。" > "$TMP/xhs.txt"
+    else
+      echo "国内版 XHS 搜索失败（退出码 $rc）。" > "$TMP/xhs.txt"
+    fi
   fi
   [ -s "$TMP/xhs.json" ] || rm -f "$TMP/xhs.json"
 }
@@ -301,9 +361,9 @@ f_fcdev() {  # Firecrawl Developer Index（70M+ 一手源）
   fi
 }
 f_qianfan() { # 百度千帆：生成式综合答案（非来源链接！）
-  [ -d "$BAIDU" ] || { echo "err" > "$TMP/skip.qianfan"; echo "千帆配套技能缺失（找不到 $SKILLS/{baiduaisearchwithquota,baidu-ai-search}/scripts）。装上面任一名字的技能即可恢复本路，缺它不影响其余 12 路。" > "$TMP/qianfan.txt"; return; }
-  timeout 50 python3 "$BAIDU/smart_search.py" search "$Q" \
-    > "$TMP/qianfan.raw" 2> "$TMP/qianfan.err"
+  [ -f "$BAIDU/smart_search.py" ] || { echo "not-configured" > "$TMP/skip.qianfan"; echo "千帆配套技能未安装；本轮按未配置跳过，不计为渠道故障。" > "$TMP/qianfan.txt"; return 0; }
+  run_command_with_timeout 50 "$TMP/qianfan.raw" "$TMP/qianfan.err" \
+    python3 "$BAIDU/smart_search.py" search "$Q"
   _qrc=$?
   sed -e '/^--- 配额状态 ---/,$d' -e '/^\[调度\]/d' "$TMP/qianfan.raw" > "$TMP/qianfan.txt" 2>/dev/null
   # 千帆报错时绝不能把错误文本当「AI 答案」渲染：报错、空输出、或 stderr 有内容 → 标 err
@@ -591,12 +651,22 @@ PYPICK
 #   · V2EX /search?q= —— 302 → /go/search，返回「搜索引擎技术研究」节点帖子，与 query 无关
 #     （会给假结果；假结果比无响应更毒，故整路移除）
 #   · 博客园 zzk.cnblogs.com —— 302→zzkx 后返回 5.7KB 壳页、0 结果
-#   中文社区长尾现在靠 掘金 + SegmentFault；cn.bing 已投毒、知乎 403、微博需登录 → 走千帆快照。
+#   中文社区长尾现在靠 掘金 + SegmentFault + 知乎开放平台 API；cn.bing 已投毒。
 
 # ---------- 并发发射 ----------
 launch() {   # $1 = 函数名；失败不拖垮整体
   fn="$1"; key="${fn#f_}"
   want "$key" || return 0
+  if [ "$key" = "qianfan" ] && [ ! -f "$BAIDU/smart_search.py" ]; then
+    echo "not-configured" > "$TMP/skip.qianfan"
+    echo "千帆配套技能未安装；本轮按未配置跳过，不计为渠道故障。" > "$TMP/qianfan.txt"
+    return 0
+  fi
+  if [ "$key" = "bili" ] && ! command -v bilibili >/dev/null 2>&1; then
+    echo "not-configured" > "$TMP/skip.bili"
+    echo "bilibili CLI 未安装；本轮按未配置跳过，不计为渠道故障。" > "$TMP/bili.txt"
+    return 0
+  fi
   # 健康状态：连续失败 ≥3 次的路默认不再发请求（除非 --force 或 --on 显式点名）
   if [ "$FORCE" != "1" ] && [ -z "$ON" ]; then
     case " $HEALTH_BAD " in
@@ -606,7 +676,7 @@ launch() {   # $1 = 函数名；失败不拖垮整体
   ( "$fn" ) &
 }
 for fn in f_se f_hn f_jj f_zhihu f_zhihuall f_zhihuhot f_zhida f_oalex f_crossref f_segfault f_fcdev f_gh f_qianfan f_tf f_serper f_fcs f_wiki f_tavily f_parallel f_youcom f_anysearch f_brave f_xhs f_bili; do launch "$fn"; done
-# --on 显式点名时也要跑 deep 档通道，否则 `--on xhs` 静默无效
+# --on 显式点名时也要跑 deep 档通道，否则 deep 通道的结果会丢掉
 if [ "$DEEP" = 1 ] || [ -n "$ON" ]; then
   for fn in f_langsearch f_exa f_fcres; do launch "$fn"; done
 fi
@@ -618,10 +688,10 @@ wait
 export D_REACH_T0
 # 脚本指纹：通道的「这路坏了/要登录」结论绑定它。改了脚本旧结论自动作废，
 # 不用手删 channels.json（照 Agent-Reach 的 fingerprint 失效机制）。
-D_REACH_FP=$(md5sum "$DIR/fanout.sh" 2>/dev/null | cut -c1-8)
+D_REACH_FP=$(cat "$DIR/fanout.sh" "$DIR/route_config.py" | md5sum 2>/dev/null | cut -c1-8)
 export D_REACH_FP
 
-python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" <<'PY'
+python3 - "$TMP" "$Q" "$N" "$DEEP" "$ON" "$DEFAULT_DISABLED" <<'PY'
 import json, os, re, sys, html, pathlib, time
 from datetime import datetime, timezone, timedelta
 
@@ -637,9 +707,10 @@ def print(*a, **k):
     if k.get("file") is sys.stdout or "file" not in k:
         _REAL_PRINT(*a)
 
-tmp, Q, N, DEEP, ON = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+tmp, Q, N, DEEP, ON, DEFAULT_DISABLED = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6]
 N = max(1, min(N, 20))
-ONLY = {c for c in ON.split(",") if c} if ON else None   # None = 全跑
+ONLY = {c for c in ON.split(",") if c} if ON else None   # None = 按默认启用清单
+DISABLED = {c for c in DEFAULT_DISABLED.split(",") if c}
 
 def load_text(name):
     p = os.path.join(tmp, name)
@@ -846,15 +917,14 @@ def r_xhs():
     rows = []
     for it in items[:6]:
         nc = it.get("note_card") or {}
-        t = nc.get("display_title") or nc.get("desc") or ""
-        nid = it.get("id") or ""
-        if not t or not nid:
+        title = nc.get("display_title") or nc.get("desc") or ""
+        note_id = it.get("id") or ""
+        if not title or not note_id:
             continue
-        # 摘要给作者和赞数，「小红书笔记」这种复读平台名的占位没有信息量
-        _u = ((nc.get("user") or {}).get("nickname") or "").strip()
-        _l = ((nc.get("interact_info") or {}).get("liked_count") or "").strip()
-        _meta = " · ".join(x for x in (_u, (_l + " 赞") if _l else "") if x) or "小红书笔记"
-        rows.append((trunc(t, 80), "https://www.xiaohongshu.com/explore/" + nid, _meta))
+        author = ((nc.get("user") or {}).get("nickname") or "").strip()
+        likes = ((nc.get("interact_info") or {}).get("liked_count") or "").strip()
+        meta = " · ".join(value for value in (author, (likes + " 赞") if likes else "") if value) or "小红书笔记"
+        rows.append((trunc(title, 80), "https://www.xiaohongshu.com/explore/" + note_id, meta))
     return rowify(rows)
 
 def r_bili():
@@ -1177,8 +1247,8 @@ SECTIONS = [
     ("anysearch","AnySearch（1000 次/天，20+ 垂直域）", "带 key 额度不按 IP；每天 1000 次", r_anysearch, False),
     ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
-    ("xhs",      "小红书（种草/体验/避坑）", "需登录态 cookie；冷却 2 分钟", r_xhs, False),
-    ("bili",     "B 站视频（实测/教程/评测）", "需登录态；冷却 90 秒", r_bili, False),
+    ("xhs",      "国内版小红书（真实体验/种草/避坑）", "可选 xhs CLI；缺少时按未配置跳过；需登录态；冷却 2 分钟", r_xhs, False),
+    ("bili",     "B 站视频（实测/教程/评测）", "可选 bilibili CLI；缺少时按未配置跳过；需登录态；冷却 90 秒", r_bili, False),
     ("langsearch", "LangSearch count=20（时效/限域）", "每日 token 额度；本技能自设 50/日保守线，已 quota.py use", r_langsearch, True),
     ("exa",      "Exa（语义/英文）", "已 quota.py use", r_exa, True),
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
@@ -1198,14 +1268,17 @@ def http_code(key):
     t = load_text(key + ".http")
     return t.strip() if t else None
 
-_default_n = sum(1 for _s in SECTIONS if not _s[4])
+_default_n = sum(1 for _s in SECTIONS if not _s[4] and _s[0] not in DISABLED)
 if ON:
-    # --on 时实际只跑点名的几路，头部不能写默认档的 19 路
-    _label = f"指定通道（{len([c for c in ON.split(',') if c])} 路）"
+    _selected = (ONLY or set()) - DISABLED
+    _label = f"指定通道（{len(_selected)} 路）"
 elif DEEP == "1":
-    _label = f"deep 深调研档（{len(SECTIONS)} 路）"
+    _deep_n = sum(1 for _s in SECTIONS if _s[0] not in DISABLED)
+    _label = f"deep 深调研档（{_deep_n} 路）"
 else:
     _label = f"默认档（{_default_n} 路）"
+if DISABLED:
+    _label += f"；未运行 {', '.join(sorted(DISABLED))}"
 print(f"## fanout「{Q}」— {_label}\n")
 # ---------- 通道健康状态（跨轮记忆）----------
 HEALTH = pathlib.Path(os.environ.get("D_REACH_HEALTH") or os.path.expanduser("~/.agent-reach/channels.json"))
@@ -1329,7 +1402,9 @@ skipped, failed = [], []
 for key, name, note, fn, deep_only in SECTIONS:
     if ONLY and key not in ONLY:
         continue                      # 本轮没请求这条路 → 不渲染（≠无响应）
-    # --on 显式点名时，deep 档通道也要渲染，否则 `--on xhs` 跑完结果被丢掉
+    if key in DISABLED:
+        continue                      # 不在本轮启用清单
+    # --on 显式点名时，deep 档通道也要渲染，否则点名结果会被丢掉
     if deep_only and DEEP != "1" and key not in [c for c in (ON or "").split(",") if c] \
             and not os.path.exists(os.path.join(tmp, "skip." + key)):
         continue
@@ -1382,10 +1457,25 @@ for key, name, note, fn, deep_only in SECTIONS:
         print(f"### 🔇 {name} —— 平台风控要验证码（等几小时或换个词；不影响其余通道）\n")
         skipped.append(key); mark(key, "skip")
         continue
+    if skip == "not-configured":
+        v = health.get(key)
+        if isinstance(v, dict):
+            v["streak_fail"] = 0
+            v.pop("suspend_until", None)
+            v.pop("suspend_secs", None)
+            v.pop("code", None)
+        detail = load_text(key + ".txt") or "本机未配置此渠道。"
+        print(f"### 🔇 {name} —— 未配置，已跳过且不计失败：{detail.strip()[:180]}\n")
+        skipped.append(key); mark(key, "skip")
+        continue
     if skip == "err":
         detail = load_text(key + ".txt") or ""
-        print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
-        failed.append(key); mark(key, "fail", "setup")
+        if key == "xhs":
+            print(f"### ⚠️ {name} —— xhs CLI 搜索失败：{detail.strip()[:200]}\n")
+            failed.append(key); mark(key, "fail")
+        else:
+            print(f"### ⚠️ {name} —— 本机依赖不可用：{detail.strip()[:200]}\n")
+            failed.append(key); mark(key, "fail", "setup")
         continue
     try:
         rows = fn()

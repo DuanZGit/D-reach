@@ -4,7 +4,7 @@
 
 # 搜索工具
 
-> **主路由表在 `SKILL.md`，国内环境通道实测清单在 [`cn-reach.md`](cn-reach.md)。本文只补参数细节，不重复路由。**
+> **主路由表在 `SKILL.md`，国内环境通道实测清单在 [`cn-reach.md`](cn-reach.md)。本文只补参数细节，不重复路由。** 默认启用通道由 `~/.agent-reach/fanout-defaults.json` 的正向清单控制；无配置时最多运行 22 条 base 路由，`--deep` 最多 27 条。
 
 ## 调研强度与调用序列
 
@@ -14,15 +14,16 @@
 > 本节保留是因为它解释**每一轮在干嘛**——fanout 只把「铺开」这一个动作自动化了。
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2 默认档：21 路并发（~5s）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep    # L3：+LangSearch/Exa/FC-Research/BrightData
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on bing   # L1：单路点查，再配一手源
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"          # L2：运行 enabledByDefault 清单
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep    # L3：追加 enabledForDeep 清单
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn     # L1：本轮仅运行指定路由
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on xhs,bili # 显式查真实体验/测评
 ```
 
 **L1 点查**（2 来源 / 1 轮）—— 例：查某库版本发布日期
 
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "Rust 1.90 release date" --on bing
+bash $SKILLS/d-reach/scripts/fanout.sh "Rust 1.90 release date" --on hn
 # 一手源优先：直接读官方公告原文（Jina，记账）
 curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 ```
@@ -31,17 +32,17 @@ curl -s --max-time 30 "https://r.jina.ai/https://blog.rust-lang.org/"
 
 | 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（默认档 21 路） |
+| 轮 1 发现 | 中英文 + 真实使用体验 + 中文长尾 + 学术一次全铺 | `fanout.sh "<query>"`（按默认清单运行，最多 22 条 base） |
 | 轮 2 追证 | 对轮 1 冒出的每个候选抓一手源；补反向体验 | Jina 读官方文档原文；`<候选> vs`、`<候选> 问题`、`<候选> 替代` |
 
-只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 默认档
-默认档 21 路里 12 路完全免 key，`--deep` 的 3 路由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
+只有 Exa / BrightData / Jina / LangSearch / Firecrawl-SDK 才 `quota.py use`；fanout 按默认清单运行。
+`--deep` 中的限额路由由脚本自动记账（越免费线自动跳过该路，不拖死其他路）。
 
 **L3 深调研**（10 来源 / 3 轮 / 必含反证）
 
 | 轮 | 做什么 | 用什么 |
 |---|---|---|
-| 1 广撒 | 中英文 + 学术 + 编程一手源 + 全网覆盖一次全铺 | `fanout.sh "<query>" --deep`（24 路） |
+| 1 广撒 | 中英文 + 学术 + 编程一手源 + 全网覆盖一次全铺 | `fanout.sh "<query>" --deep`（最多 27 条路由） |
 | 2 追深 | 把首轮捞到的人名/机构/版本/术语回灌成新查询 | `fanout.sh "<回灌词> 原理/对比/评测" --deep` |
 | 3 反证 | `<主题> 缺点/失败/不推荐/争议/vs 替代` | `fanout.sh "<主题> 缺点 不推荐" --deep`；反证轮**不并入**前两轮计数 |
 
@@ -80,28 +81,27 @@ Firecrawl Developer（`repos`/`sources`/`topic` 过滤）；中文 query 时 Cro
 
 ## 免费通道铺开清单（不限量，深挖主力）
 
-> **别逐条手打** —— 这些里能一起铺的已经被 `fanout.sh` 默认档一次并发打完了
-> （千帆 / FirecrawlDev / StackExchange / HN / 掘金 / SegmentFault / OpenAlex / Crossref / TinyFish
-> 共 9 路）。下表留作「fanout 没覆盖到的场景」查漏。
+> **别逐条手打** —— 这些里能一起铺的由 `fanout.sh` 按 `enabledByDefault` 清单并发执行（无配置时最多 22 条 base 路由）。
+> 下表留作「fanout 没覆盖到的场景」查漏。
 
 | 场景 | 通道 | 命中数（L2 建议） | fanout 覆盖？ |
 |---|---|---|---|
-| 英文/技术 | LangSearch ⏱ / TinyFish | 2-5 | ✅ 默认档（cn.bing 已判死，仅留探针） |
+| 英文/技术 | TinyFish；deep 时追加 LangSearch ⏱ | 2-5 | ✅ base / deep 清单 |
 | 报错/排障 | StackExchange `search/advanced?q=` | 1-2 | ✅ 默认档 |
 | 深度讨论 | HN Algolia | 1-2 | ✅ 默认档 |
 | 学术 | OpenAlex → Crossref | 1-2 各 | ✅ 默认档 |
 | 编程一手源 | Firecrawl Developer Index（免 key） | 2-5 | ✅ 默认档 |
-| 中文技术长尾 | 掘金 API / SegmentFault（~~博客园~~已退役） | 1-2 | ✅ 默认档 |
-| 中文综合回答 | 百度千帆（生成式，非来源） | 1 | ✅ 默认档（标 💬） |
+| 中文技术长尾 | 掘金 API / SegmentFault（~~博客园~~已退役） | 1-2 | ✅ base 清单 |
+| 中文综合回答 | 百度千帆（生成式，非来源） | 1 | ✅ base 清单（依赖缺失时未配置跳过） |
 | 行业资讯 | 36氪 / InfoQ / 澎湃 / 界面 | 1-2 | ❌ 需手打 |
 | 书影音评分 | 豆瓣 `window.__DATA__` | 1 | ❌ 需手打 |
 | 代码/仓库 | gh CLI search / DeepWiki `ask_question` | 1-3 | ❌ 需手打 |
 | A 股公告 | 巨潮 cninfo | 1-2 | ❌ 需手打 |
+| 真实体验/避坑 | 国内版 XHS / B站 | 1-3 | ✅ base 清单（XHS 需要登录态） |
 | 微信公众号 | weixin.sogou.com | 1 | ❌ 需手打 |
 
-> `--deep` 追加的 LangSearch / Exa / Firecrawl-Research / BrightData-Google 是限额/计 token 通道，
+> `--deep` 追加 `enabledForDeep` 中列出的路由；LangSearch / Exa / Firecrawl-Research 属于限额/计 token 通道，
 > 脚本会自动 `quota.py use`；这些通道 **不要 `quota.py use` 之外再手动 use**（会双扣）。
-> deep 四路的月余量实测 >96%（2026-10-26 复核；具体数字以 `python3 scripts/quota.py budget` 为准，不抄快照）——
 > **L3 无条件铺，不必省**。
 
 ## 搜索路由（速查，完整见 SKILL.md）

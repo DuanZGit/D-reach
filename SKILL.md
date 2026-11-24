@@ -1,11 +1,11 @@
 ---
 name: d-reach
 description: >
-  统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（小红书/B站/微博/Twitter/Reddit）、
-  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、Exa、LangSearch、Firecrawl、
-  Jina Reader、gh CLI、DeepWiki、yt-dlp、bili、xhs 等全部通道，共享一套免费额度计数器。
-  **执行纪律（L2 起）**：一律先跑 `scripts/fanout.sh "<query>"` 一条命令并发铺满默认档 22 路（~5s）；
-  L3 或命中「对比/选型/调研/为什么/最新/vs/替代」再追加 `--deep`（+3 路限额通道 + 知乎热榜/直答，脚本自动记账）。
+  统一搜索与爬取路由器，覆盖中英文网页搜索、社交媒体（国内版 XHS/B站/微博/Twitter/Reddit）、
+  GitHub 仓库、视频字幕、股票行情和任意网页抓取。整合百度千帆、xhs CLI、Exa、LangSearch、Firecrawl、
+  Jina Reader、gh CLI、DeepWiki、yt-dlp、bili 等通道。
+  **执行纪律（L2 起）**：先跑 `scripts/fanout.sh "<query>"`，实际路由由 `~/.agent-reach/fanout-defaults.json` 的正向清单决定；
+  未配置时最多运行 22 条 base 路由。L3 可追加 `--deep`，最多扩展到 27 条注册路由（3 路限额通道 + 知乎热榜/直答）。
   禁止一条一条串行 curl（实测串行 3 路 2.95s vs 并行 1.30s），禁止没铺开就下结论。
   只要用户想搜（搜/查/找/search/搜索/查一下/帮我搜）、想爬或抓网页内容（爬/抓/scrape/提取数据）、
   想读一篇文章或链接（读一下/打开这个/看看链接）、想查社交平台内容（小红书/B站/微博/推特/Reddit）、
@@ -27,11 +27,11 @@ upstream:
 
 ---
 
-> **pi 用户**：本技能另有一个插件版（`pi-extension/d-reach.ts`），三件事已做成原生工具：
-> `d_reach`（检索，auto/quick/base/deep 四档；auto 先问 classifier.dev 判场景，判不出才退回关键词正则）、
+> **pi 用户**：本技能另有一个插件版（`plugin/index.ts`），五个工具已做成原生入口：
+> `d_reach`（检索，auto/quick/base/deep 四档；实际请求数受默认启用清单影响）、
 > `d_reach_fetch`（抓 URL，十档自动降级：微信直连 → cookie 注入 → curl → **Playwright 本地渲染** →
 > TinyFish → Parallel fetch → Jina → markdown.new → BrightData → archive.today）、
-> `d_reach_quota`（额度+健康）、`d_reach_social`（B站/小红书登录态体检与搜索）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
+> `d_reach_quota`（额度+健康）、`d_reach_social`（B站/国内版 XHS 登录态体检与搜索）、`d_reach_decide`（基于网页证据的类型化判断）。**装了插件时优先用工具，不必读本文件**；没装就用下面的命令。
 >
 > **路径约定**：本文件里 `$SKILLS` = 技能根目录。执行前先解析：
 > `SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills`
@@ -41,18 +41,18 @@ upstream:
 
 > 🔴 **RED LINE —— 每次搜索前先过这一条**
 >
-> **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 把通道铺开，再进追深 / 反证轮。**
-> 只打一路（哪怕第一路出了结果）就下结论 = 违规。
-> 理由很直白：27 条路里 22 路走默认档（其中 12 路**完全免 key**：se / hn / jj / oalex / crossref / segfault / wiki / tavily / parallel / youcom / anysearch / gh；知乎 4 路（站内/全网/热榜/直答）走开放平台官方 API，同一个 key，日限 5000/5000/100/100；xhs / bili 需登录态 cookie 且设了 2 分钟最小间隔；千帆需配套技能；TinyFish、Serper、Firecrawl 需 key 但已配额）、3 路限额通道月余量 >96%
+> **L2 起必用 `bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]` 并发执行默认启用清单，再进追深 / 反证轮。**
+> 只打一路（哪怕第一路出了结果）就下结论 = 违规。默认清单保存在 `~/.agent-reach/fanout-defaults.json`；省略的通道不运行。
+> 未配置清单时最多运行 22 条 base 路由；`--deep` 可将注册路由扩展到 27 条。清单使用正向启用项，`--on` 临时指定本轮白名单。
+> 国内版 XHS 使用可选的 `xhs` CLI；缺少 CLI 时标记未配置并跳过。站点登录态问题由 CLI 返回，不会自动登录。B站使用现有登录态。
+> 缺少千帆配套技能时也标记未配置并跳过，不增加故障连败。
 > —— **不铺开不是省钱，是把信息漏掉**。
 > 例外只有 L1 点查（2 路互证，`--on hn,<最相关一路>`）。
 >
 > 🧩 **配套技能（不在本仓里）**：千帆那一路靠第三方技能 `baiduaisearchwithquota`（克隆版目录名）或
-> `baidu-ai-search`（viking 按 slug 落的目录名），两者同一个包。只装 d-reach 不装它，千帆路会标 err 跳过，
-> 其余 13 路照跑。装法：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`。
+> `baidu-ai-search`（viking 按 slug 落的目录名），两者同一个包。只装 d-reach 不装它，千帆路会标记未配置并跳过；其他启用通道继续执行。装法：`git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`。
 
-把"用户想找信息"翻译成"用哪个通道、怎么调用"。**路由表由你（agent）直接执行**，
-没有中间脚本；唯一的代码是 `scripts/quota.py`，它只负责记额度。
+把"用户想找信息"翻译成"用哪个通道、怎么调用"。`SKILL.md` 和 `references/` 提供路由规则；`scripts/fanout.sh` 负责并发调用并按正向清单选路，`scripts/quota.py` 记录限额通道使用。
 
 ## 决策流程（默认 L2，见下节）
 
@@ -64,11 +64,11 @@ upstream:
    - 已经有人存过公开存档（`archive.ph`）
 1. **定档**：按「调研强度」判断本次是 L1 / L2 / L3，记住该档的**最小来源数与轮次**
 2. **铺开通道 = 一条命令**：`bash $SKILLS/d-reach/scripts/fanout.sh "<query>" [--deep]`
-   L2 起一律走它：**默认档 22 路并发**（实测约 5s），`--deep` 追加 LangSearch / Exa /
-   Firecrawl-Research（约 10-15s）。**别一条一条串行试** ——
+   L2 起一律走它：按 `fanout-defaults.json` 的正向清单并发执行；没有配置文件时最多运行 22 条 base 路由。`--deep` 再加 deep 清单（最多 27 条总路由）。**别一条一条串行试** ——
    实测同一 query 3 路串行 2.95s vs 并行 1.30s：铺开耗时 ≈ 最慢那一路，与路数基本无关。
    L1 点查可只跑两路互证：`fanout.sh "<query>" --on hn,<最相关一路>`
-   想知道单路返回什么/排查某通道时，用 `--on <通道名>` 隔离测试（通道名见 fanout.sh 头注释）
+   `--on` 临时设置本轮白名单，不修改默认清单。
+   社交媒体、真实体验、测评和避坑查询优先使用 `xhs,bili,zhihu`。
 3. **记账**：限额通道（⏱）调用前 `python3 scripts/quota.py use <svc>`
    - exit 0 → 正常用
    - **exit 2 → 已过 30% 裕度线（仍记账）**：这一路后续只用在免费通道拿不到的内容上
@@ -120,11 +120,9 @@ Exa 立刻命中官方 wiki 和真实 issue）——长尾限定词交给 LangSe
 术语、竞品名**回灌成第二轮 query（`fanout.sh "<回灌词> 原理/对比/评测" --deep`），
 再单独跑一轮反证。首轮与追深轮的来源**不合并计数**（要的是互相印证，不是凑数）。
 
-**免费优先**：`fanout.sh` 默认档一次并发 **22 路**（Firecrawl Developer /
-StackExchange / HN / 掘金 / 知乎站内 / 知乎全网 / SegmentFault / OpenAlex / Crossref / 千帆 / TinyFish / Serper /
-tavily / parallel / Wikipedia / Firecrawl-search / GitHub / You.com / AnySearch / 小红书 / B站）—— 它们不限量、不记账，
-**闲着才是浪费**；`--deep` 的 LangSearch / Exa / Firecrawl-Research 是限额/计 token 通道，
-再加知乎热榜与直答（各 100 次/日，**与查询词无关或非来源**，看热点才跑）。
+**免费优先**：`fanout-defaults.json` 显式列出默认启用的 base 路由；没有配置文件时最多运行 22 条 base 路由。
+XHS、知乎、千帆等路线是否运行由清单决定；缺少 xhs CLI 或千帆依赖时显示未配置并跳过。
+`--deep` 追加 `enabledForDeep` 中列出的路由，最多将总路由扩展到 27 条。
 **L3 无条件铺**（实测月余量 >96%，不用省着），L2 视首轮缺口补铺。
 
 ## 收尾自查（交付前逐条过）
@@ -190,20 +188,26 @@ URL 或 `X-Gateway-Key` 头必须带对 key；防火墙只放行这两个网段�
 
 ## 铺开器 fanout.sh（L2 起必用）
 
+默认通道采用正向启用清单。示例配置在 `fanout-defaults.example.json`；复制到
+`~/.agent-reach/fanout-defaults.json` 并编辑 `enabledByDefault` / `enabledForDeep` 可自定义默认路由。
+配置文件缺失时启用全部已注册 base 路由；配置存在时，只运行清单列出的路由。`D_REACH_DEFAULTS_FILE`
+可指定其他配置路径。
+
 ```bash
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 默认档：22 路并发（~5s，12 路完全免 key）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # +LangSearch/Exa/FC-Research/知乎热榜/直答（~20s，27 路）
-bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 只跑指定路（点名 deep 通道会自动开 deep）
+bash $SKILLS/d-reach/scripts/fanout.sh --list                  # 查看已注册路由与正向启用状态
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>"              # 运行 enabledByDefault 中的路由
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --deep        # 再运行 enabledForDeep 中的路由
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on hn,oalex  # 临时只跑指定路由
+bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --on xhs,bili  # 本轮只跑 XHS 和 B站
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --n 8         # 每路多列几条（显示条数）
 bash $SKILLS/d-reach/scripts/fanout.sh "<query>" --force       # 忽略健康状态强跑（复检用）
 ```
 
-> 判档不在 fanout.sh 里做 —— 它只按 `--on` / `--deep` 跑。`auto` 选哪几路是插件的活：
+> 判档不在 fanout.sh 里做 —— 它只按配置清单、`--on` 和 `--deep` 跑。`auto` 选哪几路是插件的活：
 > 先问 classifier.dev（免 Key 免费额度，传 query + 11 个场景词，约 1.2s）要一个场景标签，
 > 拿到就按 `SCENES` 表映射通道；判不出再退回关键词正则；都不行就明说没把握并给通道菜单。
-> 场景里 `repo`（找开源项目）走 `gh,tf,qianfan`、`social`（真实体验/避坑）走 `xhs,bili,qianfan`，
-> 两者都排在 `local` / `compare` 前面。xhs 与 bili 也在默认档里，但各自设了最小调用间隔
-> （xhs 2 分钟、bili 90 秒），连打会直接跳过而不是硬撞风控。想换判档后端设 `D_REACH_CLASSIFIER_URL`（同一个 `{input,labels}` 契约），设空则禁用。
+> 场景里 `repo`（找开源项目）走 `gh,tf,qianfan`、`social`（真实体验/避坑）走 `xhs,bili,zhihu,qianfan`，
+> 两者都排在 `local` / `compare` 前面。XHS 搜索有 2 分钟本地冷却；缺少 `xhs` CLI 时按未配置跳过。B站也有冷却，连打会直接跳过而不是硬撞风控。想换判档后端设 `D_REACH_CLASSIFIER_URL`（同一个 `{input,labels}` 契约），设空则禁用。
 
 **通道健康状态**：每轮结果写进 `~/.agent-reach/channels.json`（ok / fail / streak_fail / suspend_until）。
 连续失败 ≥3 次的路进**挂起**，退避 10 分钟 → 30 分钟 → 2 小时封顶；挂起期内标 `🔇 挂起中，N 分钟后自动重试`，
@@ -288,7 +292,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 | GitHub 仓库/代码 | gh CLI ✅免 | DeepWiki MCP ✅免 | Gitee |
 | 仓库语义问答 | DeepWiki `ask_wiki_question` ✅免 | gh CLI 读源码 | —（连不上先重试：pi 的 MCP 有 ~15s 失败退避） |
 | B站 | bili CLI（需登录态） | TinyFish `run_web_automation` | — |
-| 小红书 | xhs CLI（需登录态） | TinyFish `run_web_automation` | — |
+| 国内版 XHS | `xhs search`（需 CLI 和登录态；fanout 默认启用） | TinyFish `run_web_automation` | 笔记和评论读取见 `extensions/d-reach-xhs/SKILL.md` |
 | Twitter/X | twitter-cli（需登录态，本机 `twitter` 是 npm 同名假货） | TinyFish `run_web_automation` | — |
 | 微信公众号 | weixin.sogou.com ✅免（列表页 JS 拼装，拿不到标题就换 TinyFish fetch） | Exa 限域 + BrightData ⏱ | — |
 | A股公告 | 巨潮 cninfo ✅免 | gushen（雪球） | 东方财富（需手打站内搜索） |
@@ -332,22 +336,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 > （duanz.xin 是 DDNS，IP 每天变，钉了隔天就砖）。
 
 - ✅ 实测返回真实数据：百度千帆、Exa、BrightData（抓取 + Google）、Jina、Firecrawl（developer + research）、gh（search/api）、DeepWiki `ask_question`、bili CLI、V2EX。
-- ✅ `xhs`：2026-09-05 已重新登录（search / comments 实测通）。**cookie 会周期性过期**，
-  报 `not_authenticated / Session expired` 时按下面恢复 —— 注意 `xhs login --qrcode` **走不通**：
-  扫码和确认都能过，但最后一步 `_complete_confirmed_session` 会被风控要验证码
-  （`NeedVerifyError: Captcha required type=124`），纯 HTTP 流程解不了，cookie 不落盘。
-  可用的是**借内置浏览器登录，再把 cookie 灌回 CLI**：
-
-  ```bash
-  # 1) TinyFish run_web_automation：打开 https://www.xiaohongshu.com/explore
-  #    （移动端 UA 不发二维码，必须桌面版；模态框没自动弹就点侧栏「登录」）
-  # 2) 把 img.qrcode-img 的截图区域裁出来给用户扫（dpr=4，坐标×4；必须补 ≥4 模块白边，
-  #    否则扫码器因缺 quiet zone 拒识）。别手抄 base64 —— 会抄成垃圾。
-  # 3) 用户在自己浏览器 DevTools 里取 cookie（web_session / a1 / webId / gid）
-  # 4) 写 ~/.xiaohongshu-cli/cookies.json（扁平结构，不是嵌套）：
-  #    {"a1":…,"webId":…,"gid":…,"web_session":…,"saved_at":<unix秒>}  权限 600
-  # 5) xhs status 验证 authenticated: true
-  ```
+- `xhs`：fanout 使用国内版 `xhs search --json`，需要 `xhs` CLI 和有效登录态，设置 2 分钟本地冷却。缺少 CLI 时标记未配置并跳过；登录态错误由 CLI 返回。笔记和评论读取见 `extensions/d-reach-xhs/SKILL.md`。
 
 - ❌ `twitter`：PATH 上的是 npm `twitter-cli@0.0.2`（filter stream 玩具），**不是**文档里的 Python v0.8.5。任何子命令都只打印一行 usage 并 **exit 0** —— 静默假成功，别当成"没结果"。要真用得 `pipx install twitter-cli` 并确认 `which twitter` 不再指向 `/usr/local/bin`。
 - ⚠️ Reddit 公开 JSON：数据中心 IP 被拉黑，返回 **200 + "Blocked" HTML**（不是 403），别误读成空结果 → 换 TinyFish fetch / BrightData。
@@ -401,7 +390,7 @@ gh search repos "query" --sort stars --limit 10
 
 编程文档 / 论文 / DeepWiki / gh 读文件的写法在 `references/scrape.md`、`references/dev.md`。
 
-## B站 / 小红书 铁律（踩过的坑，别再来一遍）
+## B站 / 国内版 XHS
 
 ```bash
 # B站：2026-10-28 换到 @yukariyukaro/bilibili-cli 2.x（Node，分组命令，旧平铺语法不兼容）
@@ -412,20 +401,14 @@ bilibili video hot --json                        # 热门（免登录）
 bilibili auth status --json / auth login start   # 登录态 / 扫码登录
 # 旧的 Python bili 0.6.2 仍在（有 6 月登录态），需要个人数据时可回退：bili whoami
 
-xhs search "关键词" --json         # 用 xiaohongshu-cli（纯 HTTP + cookie）
-# 为什么不用 xhs-cli（逆向 API 版）：它连 search 都要先下载 200MB 的 camoufox 浏览器，
-# 官网 GitHub release 又常卡住；xiaohongshu-cli 只要 cookie，直接走 HTTP，更轻。
-# 登录：浏览器取 a1 + web_session，写成 ~/.xiaohongshu-cli/cookies.json（扁平结构）
-xhs comments <note_id> --xsec-token <token> --all --yaml
+# 国内版 XHS：fanout 使用 xhs CLI 搜索；缺少 CLI 时按未配置跳过。
+xhs search "关键词" --json
 ```
 
 - **B站取证必须字幕 + 评论区都看**：字幕 = 作者说的（可能恰饭），评论区 = 真实用户验证
   （"买一次就没了"这类坑只出现在评论区）。单人操作帖尤其看评论；高赞薅羊毛教学默认可能有坑。
 - **B站不要用 yt-dlp**，会被 412 拦。
-- **小红书必须 xhs-cli ≥ 0.6.4**（`pip install --user --no-deps xiaohongshu-cli==0.6.4 xhshow`），
-  旧版 0.4.0 读评论被 406 风控拦。读评论一律走 `comments`，`xhs read` 会触发 captcha。
-- 裸笔记 ID 报 300031 = token 缺失/过期；短链 `xhslink.com` 需先在浏览器解析出真实 URL。
-  细节见 `extensions/d-reach-xhs/SKILL.md`。
+- 国内版 XHS 搜索依赖有效登录态；笔记和评论读取细节见 `extensions/d-reach-xhs/SKILL.md`。
 
 ## 额度（保留 30% 裕度）
 

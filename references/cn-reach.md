@@ -110,8 +110,8 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 
 | 通道 | 状态 | 用法 |
 |------|------|------|
-| 小红书 `xhs` CLI | ✅ 已登录 | `xhs search` / `xhs comments`（消费决策主力，见 SKILL 铁律） |
-| B站 `bili` CLI | ✅ | 字幕 + AI 总结 + 评论（见 SKILL 铁律） |
+| 国内版 XHS `xhs` CLI | fanout 默认社交路线；缺少 CLI 时按未配置跳过 | `xhs search`；笔记和评论读取见 `extensions/d-reach-xhs/SKILL.md` |
+| B站 `bili` CLI | 需登录态 | 字幕 + AI 总结 + 评论（见 SKILL 铁律） |
 | V2EX | ❌ **搜索已退役**（2026-09-25：`/search?q=` 302→`/go/search`，返回「搜索引擎技术研究」节点帖子、与 query 无关 → 会给**假结果**） | 掘金 / SegmentFault |
 | 豆瓣 | ✅ `search.douban.com/book/subject_search?search_text=X`，结果在 `window.__DATA__` JSON | 书/影/音评分与短评 |
 | 微博 | 302（需登录） | browser_use |
@@ -140,12 +140,12 @@ curl -s -X POST "http://www.cninfo.com.cn/new/hisAnnouncement/query" \
 公司/人物/产品 → 千帆百科星图(knowledge)   → 百度百科词条  → Exa
 学术          → OpenAlex → Crossref       → Firecrawl Research（arXiv 不可达）
 A股公告       → 巨潮资讯 cninfo           → 东方财富
-消费决策      → 小红书 → B站              → 豆瓣
+消费决策      → 国内版 XHS → B站          → 豆瓣
 行业资讯      → 36氪 / InfoQ / 澎湃 / 界面
 强反爬        → BrightData → Jina         → browser_use
 ```
 
-> **一条命令全铺**：上面这些路里能并发的，已被 `scripts/fanout.sh`（默认档 21 路 + `--deep` 3 路）
+> **一条命令全铺**：上面这些路里能并发的，由 `scripts/fanout.sh` 按 `fanout-defaults.json` 正向清单执行（无配置时最多 22 条 base、deep 总计最多 27 条）
 > 一次并发打完，**别逐条手 curl** —— 实测 3 路串行 2.95s vs 并行 1.30s。
 
 > **记账规则**：本文件所有通道 **免 Key 且不限量 → 不执行 `quota.py use`**。

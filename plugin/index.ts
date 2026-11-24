@@ -40,6 +40,7 @@ const PDF2TEXT = join(HERE, "scripts", "pdf2text.py");
 const MCP_CALL = join(SKILL_DIR, "scripts", "mcp_call.py");
 const PARALLEL_MCP = "https://mcp.parallel.ai/mcp";
 const DATA_DIR = join(homedir(), ".agent-reach");
+const DEFAULTS_FILE = process.env.D_REACH_DEFAULTS_FILE || join(DATA_DIR, "fanout-defaults.json");
 const LAST_RUN = join(DATA_DIR, "last-run.md");
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
@@ -48,9 +49,9 @@ const UA =
 
 const PROFILES = {
   auto: { label: "auto · 按场景选路", on: "" },
-  quick: { label: "quick · 3 路固定", on: "qianfan,fcdev,tf" },
-  base: { label: "base · 22 路", on: "" },
-  deep: { label: "deep · 27 路", on: "" },
+  quick: { label: "quick · 最多 3 路", on: "qianfan,fcdev,tf" },
+  base: { label: "base · 默认清单", on: "" },
+  deep: { label: "deep · 默认 + deep 清单", on: "" },
 } as const;
 
 type Profile = keyof typeof PROFILES;
@@ -77,12 +78,12 @@ const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
     why: "学术：OpenAlex + Crossref + Research Index",
   },
   {
-    // 真实体验/口碑：小红书和 B 站的实测、避坑、锐评比搜索引擎的官方介绍有用得多。
+    // 真实体验/口碑：国内版 XHS 和 B 站的实测、避坑、锐评比搜索引擎的官方介绍有用得多。
     // 放 local 之前 —— 「窑湖小镇 好玩吗 避坑」应该先看人怎么说，而不是先搜门票。
     key: "social",
-    re: /(小红书|b站|bilibili|up主|博主|种草|拔草|避坑|避雷|探店|真实体验|真实评价|值不值|好用吗|值得买|测评|锐评)/i,
+    re: /(xhs|小红书|b站|bilibili|up主|博主|种草|拔草|避坑|避雷|探店|真实体验|真实评价|值不值|好用吗|值得买|测评|锐评)/i,
     on: "xhs,bili,zhihu,qianfan",
-    why: "真实体验/口碑：小红书 + B 站 + 知乎 + 千帆",
+    why: "真实体验/口碑：国内版 XHS + B 站 + 知乎 + 千帆",
   },
   {
     // 「宜兴 窑湖小镇 万圣节 活动 门票 2026」也含 2026，本地生活必须排在时效前面，
@@ -155,13 +156,57 @@ const CHANNEL_MENU: [string, string][] = [
   ["crossref", "学术 DOI"],
   ["wiki", "Wikipedia — 概念定义、实体介绍"],
   ["gh", "GitHub — 找开源项目、仓库、轮子"],
-  ["xhs", "小红书 — 真实体验、种草、避坑、生活决策"],
+  ["xhs", "国内版 XHS — 真实体验、种草、避坑、生活决策（需登录）"],
   ["bili", "B站 — 视频实测、教程、评测"],
   ["youcom", "通用快搜"],
   ["anysearch", "垂直专库（法律/医疗/金融）"],
 ];
 
 const VALID_CHANNELS = CHANNEL_MENU.map(([k]) => k);
+
+async function defaultChannelAllowlist(): Promise<{
+  enabledByDefault: string[];
+  enabledForDeep: string[];
+  knownChannels: string[];
+  deepChannels: string[];
+}> {
+  const { stdout } = await run("bash", [FANOUT, "--list", "--json"], {
+    timeout: 15_000,
+    maxBuffer: 1 << 20,
+    env: { ...process.env, D_REACH_DEFAULTS_FILE: DEFAULTS_FILE },
+  });
+  const parsed = JSON.parse(stdout) as Record<string, unknown> | null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("D-Reach returned an invalid route config response");
+  if (typeof parsed.defaults_error === "string" && parsed.defaults_error)
+    throw new Error(`Cannot read D-Reach defaults: ${parsed.defaults_error}`);
+  const readList = (name: string): string[] => {
+    const value = parsed[name];
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
+      throw new Error(`D-Reach returned an invalid ${name} list`);
+    return value as string[];
+  };
+  const routeRows = parsed.channels;
+  if (!Array.isArray(routeRows))
+    throw new Error("D-Reach returned an invalid channel registry");
+  const knownChannels: string[] = [];
+  const deepChannels: string[] = [];
+  for (const route of routeRows) {
+    if (!route || typeof route !== "object" || typeof (route as Record<string, unknown>).key !== "string")
+      throw new Error("D-Reach returned a channel without a key");
+    const row = route as Record<string, unknown>;
+    if (row.tier !== "base" && row.tier !== "deep")
+      throw new Error("D-Reach returned a channel with an invalid tier");
+    knownChannels.push(row.key as string);
+    if (row.tier === "deep") deepChannels.push(row.key as string);
+  }
+  return {
+    enabledByDefault: readList("enabledByDefault"),
+    enabledForDeep: readList("enabledForDeep"),
+    knownChannels,
+    deepChannels,
+  };
+}
 
 /**
  * 场景判档用哪个模型。空 = 用当前会话的模型。
@@ -534,6 +579,7 @@ async function runFanout(
   channels: string,
   source = "",
   ctx?: unknown,
+  resultLimit?: number,
 ): Promise<{
   md: string;
   secs: number;
@@ -546,7 +592,9 @@ async function runFanout(
   if (profile === "deep") args.push("--deep");
   let why = "";
   let unclear = false;
-  let on = channels || PROFILES[profile].on;
+  const requestedChannels = channels.trim();
+  const explicitChannels = Boolean(requestedChannels);
+  let on = requestedChannels || PROFILES[profile].on;
   let en = "";
   if (!on && profile === "auto") {
     // 先让分类器模型判（语义判得准，用户要求效果优先），拿不到结果再退回关键词正则
@@ -556,7 +604,26 @@ async function runFanout(
     en = (picked as { en?: string }).en ?? "";
     unclear = picked.unclear === true;
   }
+  if (!explicitChannels && on) {
+    const defaults = await defaultChannelAllowlist();
+    const known = on
+      .split(",")
+      .map((value) => value.trim())
+      .filter((key) => defaults.knownChannels.includes(key));
+    if (!known.length)
+      throw new Error("自动选择的通道均已从注册表移除；请更新场景映射或显式传 channels。");
+    const selected = known.filter((key) =>
+      defaults.deepChannels.includes(key)
+        ? defaults.enabledForDeep.includes(key)
+        : defaults.enabledByDefault.includes(key),
+    );
+    if (!selected.length)
+      throw new Error("自动选择的通道都未列入默认启用清单；请调整配置或显式传 channels。");
+    on = selected.join(",");
+  }
   if (on) args.push("--on", on);
+  if (resultLimit !== undefined)
+    args.push("--n", String(Math.min(Math.max(Math.floor(resultLimit), 1), 20)));
   // 英文检索词：中文 query 打英文通道恒 0 命中（HN 0 条、SE 长中文被静默丢弃），
   // 用模型译好的英文版；没拿到就退回原 query，行为与改动前一致。
   if (en) args.push("--en", en);
@@ -576,7 +643,7 @@ async function runFanout(
   const warn =
     String(stderr ?? "")
       .split("\n")
-      .find((l) => l.includes("忽略未知通道")) ?? "";
+      .find((l) => l.includes("忽略未知通道") || l.includes("忽略未知 --on 通道")) ?? "";
   return { md: stdout, secs: (Date.now() - t0) / 1000, on, why, unclear, warn };
 }
 
@@ -2120,9 +2187,10 @@ const searchTool = defineTool({
     "官方文档/API（api/sdk/文档/参数/用法）→ fcdev,qianfan,tf；" +
     "排障（报错/卡住/不生效/端口冲突）→ se,fcdev,qianfan；" +
     "学术（论文/arxiv/survey）→ oalex,crossref,fcres；" +
+    "真实体验/口碑（种草/避坑/测评）→ xhs,bili,zhihu,qianfan；" +
     "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
-    "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）。" +
-    "quick 固定 3 路；base 22 路；deep 27 路含限额通道。返回精简摘要，完整来源写到 details.file。",
+    "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）；显式 channels 是本轮白名单，不改默认清单。" +
+    "quick 选 3 路候选；base 有 22 条注册路由；deep 有 27 条注册路由。实际请求数受 fanout-defaults.json 的正向清单影响。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
     profile: Type.Optional(
@@ -2135,17 +2203,17 @@ const searchTool = defineTool({
         ],
         {
           description:
-            "auto=按场景选 2-3 路（默认）；quick=固定 3 路；base=22 路；deep=27 路",
+            "auto=按场景选 2-3 路（默认）；quick=3 路候选；base=22 条注册路由；deep=27 条注册路由；实际请求数受默认启用清单影响",
         },
       ),
     ),
     channels: Type.Optional(
       Type.String({
         description:
-          "显式指定通道（搜索通道，不是抓取档），逗号分隔；覆盖 profile。" +
+          "显式指定本轮白名单（搜索通道，不是抓取档），逗号分隔；覆盖 profile 和默认启用清单。" +
           "可选值：qianfan 千帆 / serper Google / tf TinyFish / exa 语义 / langsearch / " +
           "fcdev Firecrawl Dev / fcs Firecrawl搜索 / fcres 论文 / tavily / parallel / " +
-          "se StackExchange / hn / jj 掘金 / segfault / oalex / crossref / bd BrightData / wiki",
+          "se StackExchange / hn / jj 掘金 / segfault / oalex / crossref / wiki / xhs 国内版小红书 / bili",
       }),
     ),
     detail: Type.Optional(
@@ -2170,6 +2238,7 @@ const searchTool = defineTool({
         params.channels ?? "",
         sourceTag(ctx),
         ctx,
+        params.detail === "full" ? 8 : undefined,
       );
       const parsed = parseFanout(md);
       if (warn) parsed.warn = warn;
@@ -2184,7 +2253,7 @@ const searchTool = defineTool({
         "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
         "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / " +
         "tavily 全网正文摘录(免key) / parallel 语义(免key) / youcom 快搜(免key) / " +
-        "anysearch 垂直专库 / gh GitHub 仓库 / xhs 小红书 / bili B站";
+        "anysearch 垂直专库 / gh GitHub 仓库 / xhs 国内版小红书 / bili B站";
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
         (why ? ` · ${why}` : on ? ` · ${on}` : "") +
@@ -2367,10 +2436,9 @@ const quotaTool = defineTool({
       }
     >;
 
-    // bd（BrightData Google）已于 2026-11-04 从全部档位移除，它的历史连败记录不是
-    // 当前通道健康状态；报在这里会让人以为「下轮会自动跳过」的还有一路活通道。
+    // bd（BrightData Google）已从搜索档位移除；它的历史记录不代表当前 fanout 通道健康状态。
     const RETIRED = new Set(["bd"]);
-    type HRec = { streak_fail?: number; code?: string };
+    type HRec = { streak_fail?: number; code?: string; last_ok?: string };
     const NEED_TITLE: Record<string, string> = {
       login: "要登录",
       antibot: "要过验证码",
@@ -2386,15 +2454,19 @@ const quotaTool = defineTool({
       if (RETIRED.has(k)) continue;
       const rec = v as HRec;
       if (rec.code && NEED_TITLE[rec.code]) need.push(`${k}（${NEED_TITLE[rec.code]}）`);
-      else if ((rec.streak_fail ?? 0) >= 3) bad.push(k);
+      else if ((rec.streak_fail ?? 0) >= 3 && rec.last_ok) bad.push(k);
     }
 
+    const unverifiedCount = Object.entries(health).filter(
+      ([k, v]) => !RETIRED.has(k) && !(v as HRec)?.last_ok,
+    ).length;
     const lines: string[] = [
       "通道健康：",
       bad.length
-        ? `  连败 ≥3（下轮自动跳过）：${bad.join(", ")}`
-        : "  没有连败挂起的通道",
+        ? `  已验证后连败 ≥3（下轮自动跳过）：${bad.join(", ")}`
+        : "  没有已验证渠道达到连败阈值（未验证不等于正常）",
     ];
+    if (unverifiedCount) lines.push(`  无成功记录/未验证：${unverifiedCount} 路`);
     if (need.length) lines.push(`  要你出手：${need.join("、")}`);
     lines.push("", "限额通道：");
     for (const [svc, v] of Object.entries(quota)) {
@@ -2479,8 +2551,7 @@ export default function dReachExtension(pi: ExtensionAPI) {
  * 但原始报错对模型毫无指导意义。所以这里先 whoami 探活，再决定能不能搜，
  * 失败时直接给「去哪刷新」而不是把 CLI 错误原样抛回去。
  */
-/** 三家 CLI 的登录态判定各写各的：老 bili 用 ok:true，bilibili 用 logged_in，
- *  xhs-cli 未登录时直接 exit 1 + 文案。统一按输出内容判，不按退出码。 */
+/** B站与国内版 XHS 的登录态输出各不相同，统一按输出内容判，不按退出码。 */
 function judgeAuth(out: string): "ok" | "expired" | null {
   if (/not_authenticated|Not logged in|"logged_in"\s*:\s*false/i.test(out))
     return "expired";
@@ -2507,17 +2578,17 @@ const SOCIAL = {
     hint: "bilibili auth login start（扫码）",
   },
   xhs: {
-    // 用回 xiaohongshu-cli（纯 HTTP + cookie）：xhs-cli 逆向版连 search 都要
-    // 下载 200MB 的 camoufox，反而不如旧包轻
+    // 国内版 XHS 仅供用户明确指定，不作为默认社交搜索路由。
     bin: "xhs",
     whoami: ["xhs", "whoami"],
     search: (q: string, _n: number) => ["xhs", "search", q, "--json"],
     authFile: join(homedir(), ".xiaohongshu-cli", "cookies.json"),
-    hint: "浏览器取 a1 + web_session 写进 ~/.xiaohongshu-cli/cookies.json",
+    hint: "国内版 XHS 登录状态由专用扩展处理",
   },
 } as const;
 
 type SocialPlatform = keyof typeof SOCIAL;
+const SOCIAL_LABEL: Record<SocialPlatform, string> = { bili: "B站", xhs: "小红书" };
 
 async function probeSocial(p: SocialPlatform) {
   const meta = SOCIAL[p];
@@ -2617,13 +2688,13 @@ const socialTool = defineTool({
   name: "d_reach_social",
   label: "d-reach 社交平台",
   description:
-    "B站 / 小红书 的登录态体检与内容搜索（B站用 bilibili 2.x，小红书用 xhs-cli 逆向 API 版）。不传 platform 只看状态；" +
-    "传 platform + query 才真的搜。登录态失效时会直接告诉你该跑哪条命令，不会把 CLI 原始报错丢回来。" +
+    "B站 / 国内版 XHS 的登录态体检与内容搜索（B站用 bilibili 2.x，小红书用 xhs CLI）。" +
+    "不传 platform 只看状态；传 platform + query 才真的搜。" +
     "Twitter/X 目前本机没装 CLI，返回缺失。",
   parameters: Type.Object({
     platform: Type.Optional(
       Type.Union([Type.Literal("bili"), Type.Literal("xhs")], {
-        description: "不传 = 只体检",
+        description: "不传 = 只体检；bili 是 B站，xhs 是小红书通道键",
       }),
     ),
     query: Type.Optional(
@@ -2637,14 +2708,14 @@ const socialTool = defineTool({
   async execute(_id, params) {
     const platforms = params.platform
       ? [params.platform]
-      : (Object.keys(SOCIAL) as SocialPlatform[]);
+      : (["bili", "xhs"] as SocialPlatform[]);
     const probes = await Promise.all(platforms.map(probeSocial));
 
     const lines: string[] = [];
     for (const pr of probes) {
       const meta = SOCIAL[pr.platform];
       const tail = pr.authFileAge ? ` · 凭据文件 ${pr.authFileAge}` : "";
-      lines.push(`- ${pr.platform}: ${pr.detail}${tail}`);
+      lines.push(`- ${SOCIAL_LABEL[pr.platform]}: ${pr.detail}${tail}`);
       if (
         pr.state === "expired" ||
         pr.state === "missing" ||
@@ -2657,12 +2728,10 @@ const socialTool = defineTool({
     if (!params.query) {
       const usable = probes
         .filter((p) => p.state === "ok")
-        .map((p) => p.platform);
+        .map((p) => SOCIAL_LABEL[p.platform]);
       lines.push(
         "",
-        usable.length
-          ? `可直接搜：${usable.join(", ")}`
-          : "当前没有可用的社交通道",
+        usable.length ? `可直接搜：${usable.join(", ")}` : "当前没有可用的社交通道",
       );
       return {
         content: [{ type: "text", text: lines.join("\n") }],
@@ -2670,8 +2739,7 @@ const socialTool = defineTool({
       };
     }
 
-    // 搜索不强制登录态：B 站公开内容免登录，小红书未登录会让 CLI 自己报错，
-    // 由下面 catch 翻译。登录态只影响「能不能拿到个人数据/字幕」。
+    // 搜索前不要求探测登录态：B站公开搜索免登录，国内版 XHS 搜索由 CLI 返回登录状态错误。
     const target = probes.find((p) => p.platform === params.platform);
     if (!target) {
       return {
@@ -2707,7 +2775,7 @@ const socialTool = defineTool({
         content: [
           {
             type: "text",
-            text: `[${target.platform}] 搜索「${params.query}」\n\n${rendered}`,
+            text: `[${SOCIAL_LABEL[target.platform]}] 搜索「${params.query}」\n\n${rendered}`,
           },
         ],
         details: { platform: target.platform, query: params.query, limit: n },
@@ -2718,7 +2786,7 @@ const socialTool = defineTool({
           {
             type: "text",
             text:
-              `[${target.platform}] 搜索失败：${e instanceof Error ? e.message.slice(0, 200) : "未知"}。` +
+              `[${SOCIAL_LABEL[target.platform]}] 搜索失败：${e instanceof Error ? e.message.slice(0, 200) : "未知"}。` +
               `\n如果是风控/限流，隔几分钟再试；登录态问题是另一类，先跑 d_reach_social 体检。`,
           },
         ],
