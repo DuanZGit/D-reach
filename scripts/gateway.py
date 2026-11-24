@@ -499,8 +499,8 @@ PAGE = r"""<!doctype html>
   <div class="bar2">
     <input id="q" placeholder="要查什么？回车直接跑" autocomplete="off">
     <select id="mode">
-      <option value="base">默认档 · 12 路</option>
-      <option value="deep">deep · +4 路限额</option>
+      <option value="base">默认档 · 读取中</option>
+      <option value="deep">deep · 读取中</option>
     </select>
     <button id="go">跑一轮</button>
   </div>
@@ -508,7 +508,7 @@ PAGE = r"""<!doctype html>
   <div class="rt">
     <div class="rt-top">
       <p class="rt-what" id="what"><b>还没有查询</b> · 通道状态来自上一轮</p>
-      <p class="rt-mode" id="mode-why">免费优先：8 路完全免 Key 不限量；Serper 走 2,500 次赠送额度、Firecrawl 走 credits。deep 才追加 LangSearch / Exa / Firecrawl-Research / BrightData，按次记账、失败不扣。</p>
+      <p class="rt-mode" id="mode-why">正在读取默认启用清单…</p>
     </div>
 
     <div class="rt-stage" id="stage">
@@ -568,12 +568,40 @@ const api = p => BASE + p + (K ? (p.includes('?') ? '&' : '?') + 'k=' + encodeUR
 let channels = [];      // /api/state 的通道
 let quota = {};         // key -> {used, limit, official}
 let lastRun = null;     // {q, deep, cells: {key: {status, count, note}}, stats}
+let defaultsError = '';
+
+function routeCounts(){
+  const base = channels.filter(ch => ch.tier === 'base');
+  const deep = channels.filter(ch => ch.tier === 'deep');
+  const baseOn = base.filter(ch => ch.default_on).length;
+  const deepOn = deep.filter(ch => ch.deep_on).length;
+  return {
+    base: baseOn,
+    total: baseOn + deepOn,
+    deep: deepOn,
+    notListed: channels.filter(ch => ch.tier === 'base' ? !ch.default_on : !ch.deep_on).map(ch => ch.key),
+  };
+}
+
+function updateRouteLabels(){
+  if (!channels.length) return;
+  const c = routeCounts();
+  $('#mode option[value="base"]').textContent = '默认档 · ' + c.base + ' 路';
+  $('#mode option[value="deep"]').textContent = 'deep · ' + c.total + ' 路';
+  const notListed = c.notListed.length ? c.notListed.join('、') : '无';
+  $('#mode-why').textContent = defaultsError
+    ? '默认启用配置有误：' + defaultsError
+    : '已注册 ' + channels.length + ' 条；默认启用清单含 ' + c.base +
+      ' 条 base 路由，未列入：' + notListed + '。deep 追加清单含 ' + c.deep + ' 条。';
+}
 
 const CODE_TITLE = {login:'要登录', antibot:'要过验证码', auth:'凭据失效',
                     ratelimit:'限流中', notfound:'端点失效', setup:'依赖缺失'};
 function cellFor(ch){
   const run = lastRun && lastRun.cells[ch.key];
   if (run) return run;
+  if (ch.tier === 'base' && !ch.default_on) return {status:'idle', count:0, note:'不在默认启用清单'};
+  if (ch.tier === 'deep' && !ch.deep_on) return {status:'idle', count:0, note:'不在 deep 清单'};
   // 确定性结论优先于「连败几次」：要登录的通道 streak 一直是 0，只看次数会显成正常
   if (ch.code && CODE_TITLE[ch.code]) return {status:'fail', count:0, note: CODE_TITLE[ch.code] + '，要你处理'};
   if (ch.streak_fail >= 3) return {status:'fail', count:0, note:'连败 ' + ch.streak_fail + ' 次，默认跳过'};
@@ -651,7 +679,9 @@ function render(){
       : (c.count ? '本轮 ' + c.count + ' 条' : '免 Key 不限量');
     return '<li class="' + cls + (c.count ? ' hit' : '') + '">' +
       '<span class="st"></span>' +
-      '<span class="nm">' + esc(ch.name) + '<small>' + ch.tier + '</small></span>' +
+      '<span class="nm">' + esc(ch.name) + '<small>' + (ch.tier === 'base'
+        ? (ch.default_on ? '默认启用' : '不在默认清单')
+        : (ch.deep_on ? 'deep 启用' : '不在 deep 清单')) + '</small></span>' +
       '<span class="right">' + esc(right) + '</span>' +
       (q.limit ? '<span class="bar"><i class="' + barCls + '" style="width:' + pct.toFixed(1) + '%"></i></span>' : '') +
       '</li>';
@@ -765,6 +795,8 @@ async function loadState(){
   try {
     const s = await (await fetch(api('/api/state'))).json();
     channels = s.channels;
+    defaultsError = s.defaults_error || '';
+    updateRouteLabels();
     quota = {};
     for (const q of s.quota) quota[q.svc] = q;
     // 把 quota 的 key 名对齐到通道 key（brightdata <- bd 等）
@@ -823,9 +855,10 @@ async function run(){
   const q = $('#q').value.trim();
   if (!q) return;
   const deep = $('#mode').value === 'deep';
+  const counts = routeCounts();
   const btn = $('#go'); btn.disabled = true; btn.textContent = '跑…';
   $('#node-pill').textContent = '运行中';
-  $('#what').innerHTML = '<b>' + esc(q) + '</b> · ' + (deep ? 'deep 16 路' : '默认 12 路');
+  $('#what').innerHTML = '<b>' + esc(q) + '</b> · ' + (deep ? 'deep ' + counts.total + ' 路' : '默认 ' + counts.base + ' 路');
   $('#node-q').textContent = q.length > 10 ? q.slice(0, 10) + '…' : q;
   $('#node-tier').textContent = deep ? 'deep' : 'L2';
   const t0 = Date.now();
@@ -842,7 +875,7 @@ async function run(){
     $('#s-skip').textContent = lastRun.stats.skip;
     $('#node-pill').textContent = '完成';
     $('#foot-note').textContent = '本轮耗时 ' + d.secs + 's · ' +
-      (deep ? 'deep 含 4 路限额通道（成功才记账）' : '默认档 12 路，8 路完全免 Key');
+      (deep ? 'deep 默认清单 ' + counts.total + ' 路' : 'base 默认清单 ' + counts.base + ' 路');
     renderLog(d.markdown);
     $('#src').innerHTML = renderSources(d.markdown);
     $('#srccnt').textContent = lastRun.stats.ok + ' 路有结果 · ' + lastRun.stats.fail + ' 路失败';
@@ -973,7 +1006,12 @@ def history(limit=30):
     return {"items": list(reversed(out))}
 
 
+DEFAULTS_ERROR = ""
+
+
 def channel_meta():
+    global DEFAULTS_ERROR
+    DEFAULTS_ERROR = ""
     try:
         out = subprocess.run(["bash", str(FANOUT), "--list"], capture_output=True,
                              text=True, timeout=10).stdout
@@ -981,9 +1019,22 @@ def channel_meta():
         return []
     items = []
     for line in out.splitlines():
-        m = re.match(r"\s{2}([a-z]+)\s+(base|deep)\s+(.+)$", line)
+        stripped = line.strip()
+        if stripped.startswith("默认启用配置有误："):
+            DEFAULTS_ERROR = stripped.split("：", 1)[1].strip()
+        m = re.match(
+            r"\s{2}([a-z]+)\s+(base|deep)\s+(.+?)\s+\[(default-on|not-default|deep-on|not-deep)\]$",
+            line,
+        )
         if m:
-            items.append({"key": m.group(1), "tier": m.group(2), "name": m.group(3)})
+            marker = m.group(4)
+            items.append({
+                "key": m.group(1),
+                "tier": m.group(2),
+                "name": m.group(3),
+                "default_on": marker == "default-on",
+                "deep_on": marker == "deep-on",
+            })
     return items
 
 
@@ -996,6 +1047,7 @@ def state():
         v = h.get(meta["key"]) or {}
         chans.append({
             "name": meta["name"], "key": meta["key"], "tier": meta["tier"],
+            "default_on": meta["default_on"], "deep_on": meta["deep_on"],
             "streak_fail": v.get("streak_fail", 0),
             "code": v.get("code"),
             "last_ok": v.get("last_ok"), "last_fail": v.get("last_fail"),
@@ -1032,7 +1084,8 @@ def state():
                            "limit": 0,
                            "official": " · ".join(parts)})
     stamp = next((v.get("probed_at") for v in official.values() if v.get("probed_at")), None)
-    return {"channels": chans, "quota": quota_rows, "official_at": stamp, "lan": LAN}
+    return {"channels": chans, "quota": quota_rows, "official_at": stamp,
+            "defaults_error": DEFAULTS_ERROR, "lan": LAN}
 
 
 def search(body):
