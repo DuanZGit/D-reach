@@ -2190,6 +2190,8 @@ const searchTool = defineTool({
     "真实体验/口碑（种草/避坑/测评）→ xhs,bili,zhihu,qianfan；" +
     "中文技术 → qianfan,se,jj；中文通用 → qianfan,tf；英文技术/硬件 → se,fcdev,hn；兜底 → tf,fcdev,qianfan。" +
     "规则覆盖不到时用 channels 显式指定（如 channels='hn,exa'）；显式 channels 是本轮白名单，不改默认清单。" +
+    "执行纪律：一次铺开并发跑（串行单路再补查是浪费轮次），铺开结果出来前不下结论；" +
+    "❌ 通道失败 ≠ 搜不到，要区分工程问题和事实结论。" +
     "quick 选 3 路候选；base 有 22 条注册路由；deep 有 27 条注册路由。实际请求数受 fanout-defaults.json 的正向清单影响。返回精简摘要，完整来源写到 details.file。",
   parameters: Type.Object({
     query: Type.String({ description: "检索词，中英文均可" }),
@@ -2257,7 +2259,8 @@ const searchTool = defineTool({
       const head =
         `d-reach ${PROFILES[profile].label} · ${secs.toFixed(1)}s` +
         (why ? ` · ${why}` : on ? ` · ${on}` : "") +
-        (unclear ? `\n> ${MENU}` : "");
+        (unclear ? `\n> ${MENU}` : "") +
+        `\n> 收尾自查：独立来源达标？（brief 至少 2 条）每条关键结论有来源且至少 1 条一手源？❌ 的路注明是失败还是真搜不到？别把「搜不到」当「不存在」——说清试过哪些通道。`;
       return {
         content: [
           {
