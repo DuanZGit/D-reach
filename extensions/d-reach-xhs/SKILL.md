@@ -112,6 +112,7 @@ Images are typically `.webp` format. Use `vision_analyze` for OCR/text extractio
 | 300012 | IP risk block | Use residential proxy or local machine |
 | 300017 | Abnormal link | CLI mangled the URL; fix the input format |
 | 300031 | Note temporarily unavailable | Note deleted/private/restricted — **not a tool or cookie problem** |
+| `type=217` | 小红书账号级验证限制；`search` / `hot` / `feed` may all fail | Stop repeated requests. Existing project notes say it may clear after a few hours to a day; this is not guaranteed. |
 
 ## Pitfalls
 

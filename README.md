@@ -5,9 +5,9 @@
 **通道**：百度千帆、Exa、LangSearch、BrightData、Firecrawl（Developer / Research Index）、Jina Reader、
 gh CLI、DeepWiki、yt-dlp、bili-cli、xhs-cli、twitter-cli、opencli、browser_use。
 
-**设计**：路由表写在 `SKILL.md`，由 agent 直接读表执行 —— 没有中间执行器。
-代码只有两个小件：`scripts/quota.py`（约 200 行）记免费额度防越线，
-`scripts/fanout.sh`（一条命令并发铺开默认档 9 路 + `--deep` 4 路限额通道）。
+**设计**：路由表写在 `SKILL.md`，`scripts/fanout.sh` 负责并发搜索，`plugin/index.ts` 提供 pi 原生工具。
+默认启用通道由 `~/.agent-reach/fanout-defaults.json` 中的正向清单控制；示例见 `fanout-defaults.example.json`。
+`--on` 可临时指定本轮通道。
 
 ## 安装
 
@@ -42,15 +42,15 @@ python3 scripts/quota.py reset brightdata
 调用方式全部在 [`SKILL.md`](./SKILL.md) 的路由表与命令块里；细节按场景查 [`references/`](references/)。
 
 ```bash
-# L2 起别逐条手打 —— 一条命令并发铺开（默认档 9 路，仅千帆/TinyFish 要 key，~5s）
+# L2 起别逐条手打 —— 一条命令并发铺开（默认启用清单由 fanout-defaults.json 控制）
 bash scripts/fanout.sh "ollama vs vllm"
-# L3 深调研：追加 LangSearch / Exa / Firecrawl-Research / BrightData（~12s，自动记账）
+# L3 深调研：追加 deep 清单中的通道（按需记账）
 bash scripts/fanout.sh "ollama vs vllm" --deep
 ```
 
 **调研强度默认 L2**（≥6 个独立来源 + 2 轮），命中「对比/选型/调研/为什么/最新/vs」等词自动升 L3
 （≥10 来源 + 3 轮）。定档依据、查询改写 ≥5 种、收尾自查见 SKILL.md。
-免费免 Key 通道不记账，**fanout 默认档已一次并发铺满；deep 四路月余量 >96%，L3 无条件铺**。
+默认档和 deep 档按正向清单运行；将通道从配置中移除即可停用，无需改脚本。
 
 `fanout.sh` 跑完会自动做一次**官方额度校准**（`quota_probe.py --quiet`，10 分钟内复用上次结果，
 不拖慢本轮）。可查的只有 Firecrawl（`/v2/team/credit-usage`）和 TinyFish（MCP `get_wallet`）；
@@ -58,11 +58,11 @@ BrightData 需要 token 有 account 读权限，Exa / Jina / LangSearch 没有�
 
 ## pi 插件版（与 skill 并行）
 
-`pi-extension/d-reach.ts` 把同一套通道做成 **pi 原生工具**，不替代 skill —— skill 给任何 harness 用，
+`plugin/index.ts` 把同一套通道做成 **pi 原生工具**，不替代 skill —— skill 给任何 harness 用，
 插件让 pi 不必先读 SKILL.md 就能直接调。
 
 ```bash
-ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
+ln -s "$(pwd)/plugin" ~/.pi/agent/extensions/d-reach
 ```
 
 | 入口 | 作用 |
@@ -70,20 +70,21 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 | 工具 `d_reach` | 并发检索：`query` + `profile`(auto/quick/base/deep) + `channels` + `detail`(brief/full) |
 | 工具 `d_reach_fetch` | 抓单个 URL，自动在 **curl → TinyFish → Jina → BrightData** 四档间降级，返回干净正文 |
 | 工具 `d_reach_quota` | 额度与通道健康；`refresh=true` 顺带跑官方校准 |
-| 工具 `d_reach_social` | B站/小红书：不传参=登录态体检，传 platform+query 才搜；失效时给修复命令 |
+| 工具 `d_reach_social` | B站/国内版 XHS 登录态体检与搜索；小红书需要 `xhs` CLI 登录态 |
+| 工具 `d_reach_decide` | 基于网页证据的类型化判断 |
 | 命令 `/reach` `/reach-deep` | 交互式跑一轮，结果只弹通知 |
 
 **profile 就是分级路由**，默认 `auto`：
 
 | 档 | 行为 | 何时用 |
 | --- | --- | --- |
-| `auto`（默认） | 按 query 特征自动选 3 路 | 绝大多数情况 |
-| `quick` | 固定 3 路（千帆 + Firecrawl Dev + TinyFish） | 已知要中英通用 |
-| `base` | 9 路 | 调研、要多来源互证 |
-| `deep` | 13 路含限额通道 | 深挖、要一手源 |
+| `auto`（默认） | 按 query 特征自动选 2-4 路，再按默认清单筛选 | 绝大多数情况 |
+| `quick` | 最多 3 路（千帆 + Firecrawl Dev + TinyFish），按默认清单筛选 | 已知要中英通用 |
+| `base` | 默认清单中的 base 路由（最多 22 条） | 调研、要多来源互证 |
+| `deep` | base 加 deep 清单（最多 27 条） | 深挖、要一手源 |
 
 `auto` 的判定（顺序即优先级）：学术关键词 → OpenAlex/Crossref/Research Index；时效词（最新/价格/发布）→ LangSearch/TinyFish/千帆；
-中文 + 技术词 → 千帆/StackExchange/掘金；纯中文 → 千帆/掘金/SegmentFault；纯英文技术 → StackExchange/Firecrawl Dev/TinyFish；其余走通用兜底。
+真实体验/口碑 → 国内版 XHS/B站/知乎/千帆；中文 + 技术词 → 千帆/StackExchange/掘金；纯中文 → 千帆/掘金/SegmentFault；纯英文技术 → StackExchange/Firecrawl Dev/TinyFish；其余走通用兜底。
 
 ## 免费额度一览
 
@@ -117,7 +118,7 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 | `FIRECRAWL_API_KEY` | Firecrawl Research Index / 提高 Developer Index 限流 |
 | `LANGSEARCH_API_KEY` | LangSearch Web Search（langsearch.com/dashboard） |
 
-社交通道另外需要 `TWITTER_AUTH_TOKEN` / `TWITTER_CT0`，以及 bili / xhs 的登录态文件。
+社交通道另外需要 `TWITTER_AUTH_TOKEN` / `TWITTER_CT0`，以及 B站 / 国内版 XHS 的登录态。
 
 ## 安全
 
@@ -129,6 +130,5 @@ ln -s "$(pwd)/pi-extension/d-reach.ts" ~/.pi/agent/extensions/d-reach.ts
 
 ## 说明
 
-基于开源 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 的本地定制超集，
-按本机实况裁剪：删除了未注册的 MCP 通道与统一执行器，保留经本机验证的
-小红书 / B站 / Twitter 登录态流程与踩坑记录。
+基于开源 [Agent-Reach](https://github.com/Panniantong/Agent-Reach) 的路由与工具扩展。
+fanout 的小红书搜索沿用国内版 `xhs` CLI 路线；OpenCLI 仅供其他可选适配器使用。

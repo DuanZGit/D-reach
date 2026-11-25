@@ -31,24 +31,30 @@ git clone https://github.com/DuanZGit/D-reach.git /var/minis/skills/d-reach
 | `python3` ≥ 3.8 | 是 | `quota.py` 记账、解析 JSON | 系统自带 |
 | `gh` CLI | 否 | GitHub 仓库/代码搜索（`gh search`） | `brew install gh` / `apt install gh` |
 | `yt-dlp` | 否 | 视频字幕（B站/YouTube） | `pipx install yt-dlp` |
-| `bili` / `xhs` / `twitter-cli` | 否 | 社交平台登录态抓取 | 见 `references/social.md` |
-| `opencli` | 否 | 电商/雪球等适配器（需 Chrome 桥） | `npm i -g @jackwener/opencli`（本机 2.0.2；2.x 默认输出 JSON，`-f yaml` 仍可用） |
+| `bili` / `xhs` / `twitter-cli` | 否 | B站、国内版 XHS 和 Twitter 社交搜索；缺少 `xhs` CLI 时该路按未配置跳过 | 见 `references/social.md` 和 `extensions/d-reach-xhs/SKILL.md` |
+| Node.js ≥ 21 + `opencli` | 否 | 其他可选浏览器适配器（电商/雪球等），不作为 fanout 或 XHS 的依赖 | `npm i -g @jackwener/opencli`；需要 Chrome 桥 |
+
 | `node` + `playwright` | 否 | 抓取链的第 ④ 档：本地真浏览器渲染（跑完 JS 的 DOM / iframe / Shadow DOM）。没装就跳过这档 | `npm i -g playwright && npx playwright install chromium`（约 170MB） |
 | `pymupdf` | 否 | PDF 直链抽文字层；没装就只能报「需 OCR / 自己下下来看」 | `pip install pymupdf` |
-| `baiduaisearchwithquota` 技能 | 否 | 千帆那一路（400 次/日）。**不在本仓里**，需单独装；目录名也接受 `baidu-ai-search`（同一包不同 slug）。两者都没有时 fanout 只标 err 跳过该路 | `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota` |
+| `baiduaisearchwithquota` 技能 | 否 | 千帆那一路（400 次/日）。**不在本仓里**，需单独装；目录名也接受 `baidu-ai-search`（同一包不同 slug）。依赖缺失时按未配置跳过，不增加故障连败 | `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota` |
 
-> 千帆是**独立技能**，不在本仓里，clone 本仓不会带上它。缺它只少 1 路，其余 12 路照跑。
+> 千帆是**独立技能**，不在本仓里，clone 本仓不会带上它。依赖缺失时该路显示为未配置并跳过。
 > 它是第三方 skill（[Stan-Xia/zhisou-skill](https://github.com/Stan-Xia/zhisou-skill)，仅需 python3 + `BAIDU_API_KEY`），装法：
 > `git clone https://github.com/Stan-Xia/zhisou-skill.git ~/.agents/skills/baiduaisearchwithquota`
+>
+> 默认启用通道使用正向清单。需要自定义时，仅在目标文件不存在时复制示例，避免覆盖已有个人配置：
+> `mkdir -p ~/.agent-reach`
+> `[ -e ~/.agent-reach/fanout-defaults.json ] || cp fanout-defaults.example.json ~/.agent-reach/fanout-defaults.json`
+> 配置缺失时沿用全部已注册通道；配置存在时，只运行 `enabledByDefault` 和 `enabledForDeep` 中列出的通道。
 
-不需要 Node、不需要 npm 安装、不需要任何 Python 第三方包。
+核心 fanout 不需要 Node.js、npm 或 Python 第三方包。OpenCLI 与 Playwright 是可选功能。`xhs` CLI 也是可选依赖；未安装时国内版 XHS 路线显示未配置并跳过，不影响其他通道。
 
 ## 3. 验证安装
 
 ```bash
 cd ~/.agents/skills/d-reach
-bash scripts/fanout.sh --list          # 应列出所有通道名
-bash scripts/fanout.sh "测试查询"       # 默认档 19 路，约 5 秒
+bash scripts/fanout.sh --list          # 查看路由与默认启用状态
+bash scripts/fanout.sh "测试查询"       # 运行当前默认启用清单（最多 22 条 base 路由）
 python3 scripts/quota.py budget        # 看限额通道还剩多少
 python3 scripts/test_quota.py          # 记账逻辑自检（应打印「自检通过」）
 python3 scripts/gateway.py --port 3426  # 可选：可视化网关，浏览器开 http://127.0.0.1:3426/
@@ -56,15 +62,15 @@ python3 scripts/gateway.py --port 3426  # 可选：可视化网关，浏览器�
 # 装成 pi 插件（自包含，不需要 skill）：把 plugin/ 整个目录放进扩展目录
 ln -s "$(pwd)/plugin" ~/.pi/agent/extensions/d-reach
 
-# 插件自带四个工具，装上即可用，不需要先读 SKILL.md：
+# 插件自带五个工具，装上即可用，不需要先读 SKILL.md：
 #   d_reach        检索（auto/quick/base/deep）
 #   d_reach_fetch  抓 URL（curl→TinyFish→Jina→BrightData 四档降级）
 #   d_reach_quota  额度与通道健康
-#   d_reach_social B站/小红书登录态与搜索，bvid 可直接取字幕
+#   d_reach_social B站/国内版 XHS 登录态体检与搜索
+#   d_reach_decide 基于网页证据的类型化判断
 ```
 
-默认档 19 路里有 9 路**完全不需要 key**（Crossref 遇中文自动跳过），所以第一次跑就该有结果。
-显示 `🔇 未配置 key` 属于正常 —— 千帆要装另一个技能、TinyFish 要 key，缺了自动跳过。
+默认档按 `enabledByDefault` 正向清单运行；没有配置文件时，最多启用 22 条已注册 base 路由。deep 额外启用 `enabledForDeep` 中的路由。国内版 XHS 使用可选的 `xhs` CLI 和现有登录态；D-Reach 不会自动登录或读取 Cookie。
 
 ## 4. 密钥清单（按需填，全部可选）
 
@@ -111,7 +117,7 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 | --- | --- | --- |
 | `TWITTER_AUTH_TOKEN` + `TWITTER_CT0` | twitter-cli 读推文/搜索 | 浏览器登录后从 Cookie 取 `auth_token`、`ct0` |
 | `~/.bilibili-cli/credential.json` | B站登录态 | `bili login`，或按 `references/social.md` 手工写 |
-| `~/.xiaohongshu-cli/cookies.json` | 小红书登录态 | `xhs login`，cookie 约 30 天失效需重取 |
+| `~/.xiaohongshu-cli/cookies.json` | 国内版 XHS fanout 登录态 | 由 `xhs` CLI 使用；笔记和评论命令见 `extensions/d-reach-xhs/SKILL.md` |
 
 ### 4.3 官方 MCP 接入（Agent 支持 MCP 时首选）
 
@@ -159,26 +165,26 @@ echo 'EXA_API_KEY=你的key' >> ~/.config/agents/env
 - MCP 走的是各服务自己的配额，本技能 `quota.py` 只管 REST 调用；走 MCP 时不记账，别以为「没记账 = 随便用」。
 - 不适合挂 MCP 的客户端（纯 HTTP 环境）照旧用 REST + `scripts/load_key.sh`，能力一样。
 
-### 4.4 完全不需要 key 的通道（装机即用，深挖主力）
+### 4.4 无 API key 通道
 
-`cn.bing`、Firecrawl Developer Index、StackExchange、HN Algolia、掘金、SegmentFault、
-OpenAlex、Crossref、GitHub（`gh` 登录即可）、DeepWiki、yt-dlp。
+可用通道与默认启用状态以 `bash scripts/fanout.sh --list` 为准。默认启用清单可在
+`~/.agent-reach/fanout-defaults.json` 中自定义；无配置文件时启用全部已注册的 base 路由。
 
-这些通道**不限量、不记账**，L2 起步就该一次铺满 —— 闲置才是浪费。
 
 ## 5. 30 秒上手
 
 ```bash
 cd ~/.agents/skills/d-reach
 
-# 默认档：19 路并发（12 路免 key，约 5s）
+# 运行 enabledByDefault 中的路由；启用范围见 fanout.sh --list
 bash scripts/fanout.sh "ollama vs vllm"
 
-# 深调研：追加 4 路限额通道（约 12s，自动记账）
+# deep 同时加入 enabledForDeep 中的路由
 bash scripts/fanout.sh "ollama vs vllm" --deep
 
-# 只看某几路
-bash scripts/fanout.sh "关键词" --on bing,hn,oalex
+# 临时指定或排除路由；不修改默认清单
+bash scripts/fanout.sh "关键词" --on hn,oalex
+bash scripts/fanout.sh "关键词" --on xhs,bili
 ```
 
 调用细节、定档规则（L1/L2/L3）、各平台命令都在 [`SKILL.md`](SKILL.md)，

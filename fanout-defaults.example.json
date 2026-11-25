@@ -1,0 +1,33 @@
+{
+  "enabledByDefault": [
+    "qianfan",
+    "gh",
+    "fcdev",
+    "se",
+    "hn",
+    "jj",
+    "zhihu",
+    "zhihuall",
+    "brave",
+    "segfault",
+    "oalex",
+    "crossref",
+    "tf",
+    "serper",
+    "tavily",
+    "parallel",
+    "youcom",
+    "anysearch",
+    "fcs",
+    "wiki",
+    "xhs",
+    "bili"
+  ],
+  "enabledForDeep": [
+    "zhihuhot",
+    "zhida",
+    "langsearch",
+    "exa",
+    "fcres"
+  ]
+}
