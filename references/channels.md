@@ -131,10 +131,11 @@
 - **代价**：带 key 与匿名**共享同一个 daily free quota**，带 key 只是让额度不按 IP 算（共享出口 IP 更稳）。Pro $3-5/1000 次。
 - **别用它做**：当通用搜索主力（中文用 `youcom` / `serper` / `tf`，英文用 `exa`）；它的价值在垂直专库。
 
-### `fcs` Firecrawl /search · 全文搜索
+### `fcs` Firecrawl v2 Search · 全文搜索
+- **接口**：`POST https://api.firecrawl.dev/v2/search`；默认请求 8 条结果，显式 `--n` 可调整（v2 上限 100），读取 `data.web`。
 - **擅长**：结果质量高 —— 实测同时命中 GitHub issue、官方文档、论文 PDF、Reddit 讨论。适合「要几篇靠谱长文」的场景。
-- **不擅长**：中文覆盖不如 `serper`；每条结果消耗 1 credit。
-- **代价**：走 Firecrawl credits（免费 1,000/月，已用 24）。
+- **不擅长**：中文覆盖不如 `serper`；结果数较多时 credits 消耗随 `limit` 增加。
+- **代价**：基础 Search 每 10 条 2 credits、向上取整；按响应的 `creditsUsed` 记账（免费 1,000/月）。
 - **别用它做**：本地生活、要 20 条以上候选。
 
 ### `wiki` Wikipedia · 概念/人物/术语/地名
@@ -192,7 +193,7 @@
 | 学术找论文 | `oalex,crossref` | 元数据免费且全 |
 | 读论文正文 | `fcres` | 唯一给全文的 |
 | 本地生活/酒店/门票 | `serper,fcs,qianfan` | Serper 直接给票价和营业时间 |
-| 对比选型 | `fcs,exa,tf` | Firecrawl 质量高 + 语义 + 全网 |
+| 对比选型 | `fcs,exa,tf` | Firecrawl v2 Search 质量高 + 语义 + 全网 |
 | 真实体验/避坑 | `xhs,bili,zhihu` | 社区笔记、视频实测与中文经验 |
 | X 是什么 / 是谁 | `wiki,qianfan` | 维基 0.7s 免费，比搜索快十倍 |
 

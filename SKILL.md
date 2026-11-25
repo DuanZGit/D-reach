@@ -164,7 +164,7 @@ $环境变量 → ~/.config/agents/env（用户级集中 env）→ <技能目录
 | Brave Search（fanout 已接，base 档） | `BRAVE_API_KEY` | api-dashboard.search.brave.com/app/keys（每月 $5 免费 credits = 1,000 次；$5/1,000 requests，50 qps） |
 | ~~腾讯元宝搜索 WSA~~ | 已弃用（2026-11-22 移除，按量计费且从未配 key） | — |
 
-> Wikipedia 不需要 key，完全免费无限量；Firecrawl /search 复用 `FIRECRAWL_API_KEY`，消耗同一份 credits。
+> Wikipedia 不需要 key，完全免费无限量；Firecrawl v2 Search（`POST /v2/search`）复用 `FIRECRAWL_API_KEY`，消耗同一份 credits。
 
 ## 可视化网关（可选，人看状态用）
 
@@ -272,8 +272,8 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 | 意图 | 首选 | 次选 | 兜底 |
 |------|------|------|------|
-| 本地生活/旅行（酒店/门票/攻略/美食/地址） | **Serper**（真 Google 结果，实测直接给票价/营业时间/热线） | Firecrawl /search | 百度千帆 |
-| 对比选型（vs/哪个好/值得/替代） | Firecrawl /search | Exa（语义） | TinyFish search |
+| 本地生活/旅行（酒店/门票/攻略/美食/地址） | **Serper**（真 Google 结果，实测直接给票价/营业时间/热线） | Firecrawl v2 Search | 百度千帆 |
+| 对比选型（vs/哪个好/值得/替代） | Firecrawl v2 Search | Exa（语义） | TinyFish search |
 | 时效/天气/政策（最新/发布/价格/固件/年份） | LangSearch（限域+时效） | TinyFish search | 百度千帆 |
 | X 是什么 / 是谁 / 的历史 | **Wikipedia**（0.7s，免费无限量） | 百度千帆 | TinyFish search |
 | 中文综合/线索 | 百度千帆（AI 摘要，**不是来源**） | TinyFish search | LangSearch |
@@ -283,7 +283,7 @@ TinyFish（tinyfish.ai）在本机有**两层入口，按场景选，不要混�
 
 > **掘金/SegmentFault 只对技术问题有用**。实测拿「宜兴窑湖小镇 万圣节 烟花 门票」问它们，返回的是「掘金签约季」「MarsCode 助力烟花绽放」「云栖大会门票开抢」——字面匹配，零相关信息。非技术的中文问题走「本地生活」或「中文综合」行。
 | 学术论文 | **OpenAlex + Crossref** ✅免 | Firecrawl Research ✅免（论文端点不耗 credits） | — |
-| 编程文档/issue | Firecrawl Developer Index ✅免 | Firecrawl /search（消耗 credits） | gh CLI ✅免 |
+| 编程文档/issue | Firecrawl Developer Index ✅免 | Firecrawl v2 Search（消耗 credits） | gh CLI ✅免 |
 | 公司/人名背景 | 千帆百科星图（200/日，需手打 `dispatch`） | 百度百科词条 | Exa |
 | 深度技术讨论 | **HN Algolia** ✅免 | 掘金 / SegmentFault | — |
 | 读一个 URL（不反爬） | `curl` 直取 ✅免 | TinyFish `fetch_content`（$0，真渲染） | Jina |
