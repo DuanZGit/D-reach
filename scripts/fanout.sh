@@ -49,12 +49,12 @@ DEEP_CHANNELS="zhihuhot zhida langsearch exa fcres"
 KNOWN="$BASE_CHANNELS $DEEP_CHANNELS"
 
 # ---------- 参数 ----------
-Q=""; ENQ=""; DEEP=0; N=5; ON=""; DEFAULT_DISABLED=""; ON_SET=0; FORCE=0
+Q=""; ENQ=""; DEEP=0; N=5; N_SET=0; ON=""; DEFAULT_DISABLED=""; ON_SET=0; FORCE=0
 LIST=0; LIST_FORMAT=table
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1 ;;
-    --n) shift; N="${1:-5}" ;;
+    --n) shift; N="${1:-5}"; N_SET=1 ;;
     --on) shift; ON="${1:-}"; ON_SET=1 ;;
     --en) shift; ENQ="${1:-}" ;;   # 英文检索词：LLM 把中文 query 译好后传进来，英文通道用它
     --force) FORCE=1 ;;   # 忽略健康状态，强制跑（调试/复检用）
@@ -157,6 +157,7 @@ PY
 # 返回 0=可跑；1=越免费线/key 缺失（写好 skip 原因）
 gate() {
   svc="$1"
+  quota_n="${2:-1}"
   if [ "$svc" = "fcres" ]; then
     # Firecrawl Research Index 论文端点官方免费 → 只验 key，不记账（2026-10-26 定价页核实）
     FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
@@ -173,13 +174,13 @@ gate() {
     # 实测 1.85s 回 5 条，比 BrightData 快 5 倍、便宜得多 → 本地生活/电商首选
     SP_KEY=$(sh "$DIR/load_key.sh" SERPER_API_KEY https://serper.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "firecrawl_search" ]; then
-    # Firecrawl /search 走同一个 key，消耗 firecrawl credits（1 credit/次左右）
+    # Firecrawl v2 Search uses the same key; f_fcs passes an estimated credit cost to this gate.
     FC_KEY=$(sh "$DIR/load_key.sh" FIRECRAWL_API_KEY https://firecrawl.dev 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
     svc="firecrawl"
   elif [ "$svc" = "wiki" ]; then
     return 0   # Wikipedia REST API 完全免费无限量，不验 key 不记账
   fi
-  python3 "$QUOTA" check "$svc" >/dev/null 2>&1; _qrc=$?
+  python3 "$QUOTA" check "$svc" "$quota_n" >/dev/null 2>&1; _qrc=$?
   # 0=正常，2=已过裕度线（仍可跑）；1=越免费线 → 跳过
   if [ "$_qrc" = "1" ]; then
     echo "quota" > "$TMP/skip.$svc"; return 1
@@ -189,7 +190,7 @@ gate() {
 
 # 成功后真扣额度（失败不扣：宁少记不多记）
 charge() {
-  python3 "$QUOTA" use "$1" >/dev/null 2>&1 || true
+  python3 "$QUOTA" use "$1" "${2:-1}" >/dev/null 2>&1 || true
 }
 want() {
   local channel="$1"
@@ -559,13 +560,35 @@ f_brave() {   # Brave Search API：自有索引（不经 Google/Bing），每月
     -o "$TMP/brave.json" -w '%{http_code}' > "$TMP/brave.http" 2>/dev/null
   [ "$(cat "$TMP/brave.http" 2>/dev/null)" = "200" ] && charge brave
 }
-f_fcs() {   # Firecrawl /search：全站搜索 + 可选抓正文，结果质量高（GitHub issue/官方文档/论文都能中）
-  gate firecrawl_search || return 0
-  curl -s --max-time 25 -X POST "https://api.firecrawl.dev/v1/search" \
+f_fcs() {   # Firecrawl v2 Search：全站搜索，结果质量高（GitHub issue/官方文档/论文都能中）
+  local fcs_limit=8 fcs_estimate actual_credits curl_rc=0
+  [ "$N_SET" = "1" ] && fcs_limit="$N"
+  [ "$fcs_limit" -lt 1 ] && fcs_limit=1
+  [ "$fcs_limit" -gt 100 ] && fcs_limit=100
+  # Search costs 2 credits per 10 requested results (rounded up); charge actual creditsUsed below.
+  fcs_estimate=$((2 * ((fcs_limit + 9) / 10)))
+  gate firecrawl_search "$fcs_estimate" || return 0
+  curl -sS --max-time 25 -X POST "https://api.firecrawl.dev/v2/search" \
     -H "Authorization: Bearer $FC_KEY" -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":8}))' "$ENQ")" \
-    -o "$TMP/fcs.json" -w '%{http_code}' > "$TMP/fcs.http" 2>/dev/null
-  [ "$(cat "$TMP/fcs.http" 2>/dev/null)" = "200" ] && charge firecrawl
+    -d "$(python3 -c 'import json,sys;print(json.dumps({"query":sys.argv[1],"limit":int(sys.argv[2])}))' "$ENQ" "$fcs_limit")" \
+    -o "$TMP/fcs.json" -w '%{http_code}' > "$TMP/fcs.http" 2> "$TMP/fcs.err" || curl_rc=$?
+  printf '%s' "$curl_rc" > "$TMP/fcs.rc"
+  if [ "$(cat "$TMP/fcs.http" 2>/dev/null)" = "200" ]; then
+    actual_credits=$(python3 - "$TMP/fcs.json" "$fcs_estimate" <<'PY'
+import json, sys
+credits = int(sys.argv[2])
+try:
+    response = json.load(open(sys.argv[1], encoding="utf-8"))
+    value = response.get("creditsUsed") if isinstance(response, dict) else None
+    if type(value) is int and value > 0:
+        credits = value
+except Exception:
+    pass
+print(credits)
+PY
+)
+    charge firecrawl "$actual_credits"
+  fi
 }
 f_wiki() {   # Wikipedia REST summary：概念/人物/术语/地名，0.7s、完全免费、无限量
   gate wiki || return 0
@@ -1179,14 +1202,40 @@ def r_brave():
     return rowify(rows)
 
 def r_fcs():
-    d = load_json("fcs.json")
-    if d is None:
-        return None
+    raw = load_text("fcs.json")
+    status = http_code("fcs")
+    if raw is None:
+        if status == "200":
+            return ("ERR", "Firecrawl v2 returned HTTP 200 with an empty response body")
+        curl_rc = load_text("fcs.rc") or "unknown"
+        curl_error = load_text("fcs.err") or "no curl diagnostic"
+        return ("ERR", f"Firecrawl v2 request produced HTTP {status or 'unknown'}, curl exit {curl_rc}: {trunc(curl_error, 120)}")
+    try:
+        d = json.loads(raw)
+    except Exception:
+        if status == "200":
+            return ("ERR", f"Firecrawl v2 returned HTTP 200 with non-JSON body: {trunc(raw, 120)}")
+        curl_rc = load_text("fcs.rc") or "unknown"
+        curl_error = load_text("fcs.err") or "no curl diagnostic"
+        return ("ERR", f"Firecrawl v2 request produced HTTP {status or 'unknown'}, curl exit {curl_rc}: {trunc(curl_error, 120)}")
+    if not isinstance(d, dict):
+        return ("ERR", "Firecrawl v2 returned a non-object JSON response")
     if d.get("success") is False:
         return ("ERR", trunc(str(d.get("error") or "firecrawl search failed"), 200))
-    return rowify([(x.get("title") or "", x.get("url") or "",
-                    trunc(x.get("description") or x.get("markdown") or "", 100))
-                   for x in (d.get("data") or [])])
+    payload = d.get("data")
+    if isinstance(payload, dict):
+        items = payload.get("web") or []
+    elif isinstance(payload, list):  # tolerate a legacy-shaped cached response
+        items = payload
+    else:
+        items = []
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        rows.append((item.get("title") or "", item.get("url") or "",
+                     trunc(item.get("description") or item.get("markdown") or "", 100)))
+    return rowify(rows)
 
 def r_wiki():
     d = load_json("wiki.json")
@@ -1248,7 +1297,7 @@ SECTIONS = [
     ("parallel", "Parallel MCP（无 key，excerpts + 日期）", "免费无 key；匿名限流，不记账", r_parallel, False),
     ("youcom",   "You.com 免 key MCP（100 次/天，0.4s）", "免 key 无账号；每天 100 次", r_youcom, False),
     ("anysearch","AnySearch（1000 次/天，20+ 垂直域）", "带 key 额度不按 IP；每天 1000 次", r_anysearch, False),
-    ("fcs",     "Firecrawl /search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
+    ("fcs",     "Firecrawl v2 Search（全文搜索，质量高）", "消耗 firecrawl credits，已 quota.py use", r_fcs, False),
     ("wiki",    "Wikipedia（概念/人物/地名）", "完全免费无限量", r_wiki, False),
     ("xhs",      "国内版小红书（真实体验/种草/避坑）", "可选 xhs CLI；缺少时按未配置跳过；需登录态；冷却 2 分钟", r_xhs, False),
     ("bili",     "B 站视频（实测/教程/评测）", "可选 bilibili CLI；缺少时按未配置跳过；需登录态；冷却 90 秒", r_bili, False),
@@ -1257,10 +1306,13 @@ SECTIONS = [
     ("fcres",    "Firecrawl Research Index（学术论文全文）", "需 key、不记账（官方论文端点免费）", r_fcres, True),
     # V2EX 已退役（会返回与 query 无关的假结果），见文件头「已退役通道」
 ]
-SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": "firecrawl", "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
+SKIPMAP = {"langsearch": "langsearch", "exa": "exa", "fcres": "fcres", "tf": "tinyfish", "serper": "serper", "fcs": ("firecrawl", "firecrawl_search"), "wiki": "wiki", "tavily": "tavily", "parallel": "parallel"}
 
 def read_skip(key):
-    for c in [key] + ([SKIPMAP[key]] if key in SKIPMAP else []):
+    aliases = SKIPMAP.get(key, ())
+    if isinstance(aliases, str):
+        aliases = (aliases,)
+    for c in (key, *aliases):
         p = os.path.join(tmp, f"skip.{c}")
         if os.path.exists(p):
             return pathlib.Path(p).read_text().strip()

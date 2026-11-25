@@ -91,13 +91,13 @@ const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
     key: "local",
     re: /(攻略|门票|开放时间|景点|酒店|民宿|住宿|自驾|美食|餐厅|咖啡|附近|地址|门店|营业|入住|景点|演出|展览|活动|烟花|周末去哪)/,
     on: "serper,fcs,qianfan",
-    why: "本地生活/旅行：Serper Google + Firecrawl + 千帆",
+    why: "本地生活/旅行：Serper Google + Firecrawl v2 Search + 千帆",
   },
   {
     key: "compare",
     re: /(\bvs\.?\b|对比|区别|哪个好|哪个更|替代|选型|值得买|值不值|还是)/i,
     on: "fcs,exa,tf",
-    why: "对比/选型：Firecrawl + Exa 语义 + TinyFish",
+    why: "对比/选型：Firecrawl v2 Search + Exa 语义 + TinyFish",
   },
   {
     key: "timely",
@@ -109,7 +109,7 @@ const SCENES: { key: string; re: RegExp; on: string; why: string }[] = [
     key: "docs",
     re: /(\bapi\b|\bsdk\b|文档|参数|接口|用法|怎么用|how to use|reference|man ?page|\buri\b|callnative|示例代码|官方文档)/i,
     on: "fcdev,fcs,qianfan",
-    why: "官方文档/API：Firecrawl Dev 索引 + Firecrawl 搜索 + 千帆",
+    why: "官方文档/API：Firecrawl Dev 索引 + Firecrawl v2 Search + 千帆",
   },
   {
     // 「什么是 X / X 是谁 / X 的历史」—— 维基百科 0.7s、免费无限量，比任何搜索通道都快
@@ -139,7 +139,7 @@ const CHANNEL_MENU: [string, string][] = [
   ["exa", "英文技术、论文、公司信息"],
   ["langsearch", "时效性新闻"],
   ["fcdev", "编程一手源：GitHub issue、技术文档"],
-  ["fcs", "全网搜索"],
+  ["fcs", "Firecrawl v2 Search — 全网搜索"],
   ["fcres", "学术论文"],
   ["tavily", "带正文摘录的搜索，中英文都行"],
   ["parallel", "语义搜索，带发布日期"],
@@ -2212,7 +2212,7 @@ const searchTool = defineTool({
         description:
           "显式指定本轮白名单（搜索通道，不是抓取档），逗号分隔；覆盖 profile 和默认启用清单。" +
           "可选值：qianfan 千帆 / serper Google / tf TinyFish / exa 语义 / langsearch / " +
-          "fcdev Firecrawl Dev / fcs Firecrawl搜索 / fcres 论文 / tavily / parallel / " +
+          "fcdev Firecrawl Dev / fcs Firecrawl v2 Search / fcres 论文 / tavily / parallel / " +
           "se StackExchange / hn / jj 掘金 / segfault / oalex / crossref / wiki / xhs 国内版小红书 / bili",
       }),
     ),
@@ -2251,7 +2251,7 @@ const searchTool = defineTool({
         "想自己指定就传 channels：qianfan 中文综述(非来源) / tf 全网 / " +
         "fcdev 官方文档 / se 报错 / hn 技术观点 / jj,segfault 中文技术(仅技术) / " +
         "oalex,crossref 学术元数据 / langsearch 时效 / exa 英文语义 / " +
-        "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl全文搜索 / wiki 维基百科 / " +
+        "fcres 论文全文 / serper Google(本地生活/电商) / fcs Firecrawl v2 Search / wiki 维基百科 / " +
         "tavily 全网正文摘录(免key) / parallel 语义(免key) / youcom 快搜(免key) / " +
         "anysearch 垂直专库 / gh GitHub 仓库 / xhs 国内版小红书 / bili B站";
       const head =
