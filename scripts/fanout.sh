@@ -29,7 +29,10 @@
 
 set -u
 
-DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# 解析自身软链再取目录：plugin/scripts 里是逐文件软链（指向本技能真目录），
+# 直接取 dirname($0) 会停在 plugin/scripts，那里没有 route_config.py 这类新加脚本。
+_SELF=$(readlink -f -- "$0" 2>/dev/null) || _SELF="$0"
+DIR="$(CDPATH= cd -- "$(dirname -- "$_SELF")" && pwd -P)"
 QUOTA="$DIR/quota.py"
 DEFAULTS_FILE="${D_REACH_DEFAULTS_FILE:-$HOME/.agent-reach/fanout-defaults.json}"
 SKILLS="$HOME/.agents/skills"; [ -d "$SKILLS" ] || SKILLS=/var/minis/skills
@@ -165,8 +168,6 @@ gate() {
   elif [ "$svc" = "tinyfish" ]; then
     TF_KEY=$(sh "$DIR/load_key.sh" TINYFISH_API_KEY https://agent.tinyfish.ai/api-keys 2>/dev/null) || { echo "key" > "$TMP/skip.tinyfish"; return 1; }
     return 0   # TinyFish search $0.00/次 → 不走 quota 记账
-  elif [ "$svc" = "brightdata" ]; then
-    BD_KEY=$(sh "$DIR/load_key.sh" BRIGHTDATA_APITOKEN https://brightdata.com 2>/dev/null) || { echo "key" > "$TMP/skip.$svc"; return 1; }
   elif [ "$svc" = "serper" ]; then
     # Serper = Google 结果，2,500 次一次性赠送（不是每月重置），之后 $1/1000
     # 实测 1.85s 回 5 条，比 BrightData 快 5 倍、便宜得多 → 本地生活/电商首选
