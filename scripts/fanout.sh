@@ -47,6 +47,7 @@ KNOWN="$BASE_CHANNELS $DEEP_CHANNELS"
 
 # ---------- 参数 ----------
 Q=""; ENQ=""; DEEP=0; N=5; ON=""; DEFAULT_DISABLED=""; ON_SET=0; FORCE=0
+LIST=0; LIST_FORMAT=table
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1 ;;
@@ -54,24 +55,25 @@ while [ $# -gt 0 ]; do
     --on) shift; ON="${1:-}"; ON_SET=1 ;;
     --en) shift; ENQ="${1:-}" ;;   # 英文检索词：LLM 把中文 query 译好后传进来，英文通道用它
     --force) FORCE=1 ;;   # 忽略健康状态，强制跑（调试/复检用）
-    --list)
-      format=table
-      [ "${2:-}" = "--json" ] && format=json
-      python3 "$DIR/route_config.py" --script "$0" --defaults "$DEFAULTS_FILE" \
-        --base "$BASE_CHANNELS" --deep "$DEEP_CHANNELS" --format "$format"
-      exit $? ;;
+    --list) LIST=1 ;;
+    --json) LIST_FORMAT=json ;;   # 配合 --list；与它前后顺序无关
     -h|--help) sed -n '2,30p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
     --*) echo "[fanout] 未知参数：$1" >&2; exit 2 ;;
     *) [ -z "$Q" ] && Q="$1" ;;
   esac
   shift
 done
+if [ "$LIST" = "1" ]; then
+  python3 "$DIR/route_config.py" --script "$0" --defaults "$DEFAULTS_FILE" \
+    --base "$BASE_CHANNELS" --deep "$DEEP_CHANNELS" --format "$LIST_FORMAT"
+  exit $?
+fi
 ENQ="${ENQ:-$Q}"   # 没给 --en 时英文通道退回原 query，行为与改动前一致
 if [ -z "$Q" ]; then echo "usage: fanout.sh \"<query>\" [--deep] [--n N] [--on chans] [--en \"<english>\"]"; exit 2; fi
 
 DEFAULT_LISTS=$(python3 "$DIR/route_config.py" --script "$0" --defaults "$DEFAULTS_FILE" \
   --base "$BASE_CHANNELS" --deep "$DEEP_CHANNELS" --format lists) \
-  || { echo "[fanout] 默认启用配置无法读取或格式错误：$DEFAULTS_FILE" >&2; exit 2; }
+  || { echo "[fanout] 路由配置加载失败（原因见上一条）；配置文件：$DEFAULTS_FILE" >&2; exit 2; }
 DEFAULT_LISTS_BASE="${DEFAULT_LISTS%%|*}"
 DEFAULT_LISTS_DEEP="${DEFAULT_LISTS#*|}"
 

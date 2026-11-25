@@ -8,11 +8,15 @@ import sys
 from pathlib import Path
 
 
+class RegistryError(ValueError):
+    """SECTIONS 与 BASE_CHANNELS / DEEP_CHANNELS 不同步 —— 是代码问题，不是配置问题。"""
+
+
 def parse_routes(script_path: Path, base_arg: str, deep_arg: str):
     source = script_path.read_text(encoding="utf-8")
     match = re.search(r"(?ms)^SECTIONS = \[\n(.*?)^\]", source)
     if not match:
-        raise ValueError("Could not parse SECTIONS route registry")
+        raise RegistryError("Could not parse SECTIONS route registry")
 
     entries = []
     for entry in re.split(r"\n(?=    \()", match.group(1)):
@@ -31,18 +35,18 @@ def parse_routes(script_path: Path, base_arg: str, deep_arg: str):
     base_keys = base_arg.split()
     deep_keys = deep_arg.split()
     if not entries:
-        raise ValueError("No route entries found in SECTIONS")
+        raise RegistryError("No route entries found in SECTIONS")
     if len(set(base_keys)) != len(base_keys) or len(set(deep_keys)) != len(deep_keys):
-        raise ValueError("Duplicate route key in BASE_CHANNELS or DEEP_CHANNELS")
+        raise RegistryError("Duplicate route key in BASE_CHANNELS or DEEP_CHANNELS")
     if set(base_keys) & set(deep_keys):
-        raise ValueError("Route key appears in both BASE_CHANNELS and DEEP_CHANNELS")
+        raise RegistryError("Route key appears in both BASE_CHANNELS and DEEP_CHANNELS")
     route_keys = {entry["key"] for entry in entries}
     if route_keys != set(base_keys) | set(deep_keys):
-        raise ValueError("SECTIONS does not match BASE_CHANNELS and DEEP_CHANNELS")
+        raise RegistryError("SECTIONS does not match BASE_CHANNELS and DEEP_CHANNELS")
     for entry in entries:
         expected_tier = "deep" if entry["key"] in set(deep_keys) else "base"
         if entry["tier"] != expected_tier:
-            raise ValueError(f"Route tier mismatch for {entry['key']}")
+            raise RegistryError(f"Route tier mismatch for {entry['key']}")
     return entries, base_keys, deep_keys
 
 
@@ -80,7 +84,7 @@ def load_data(script_path: Path, defaults_path: Path, base_arg: str, deep_arg: s
         error = ""
     except Exception as exc:
         enabled_base, enabled_deep = [], []
-        error = str(exc)
+        error = f"defaults: {exc}"
 
     base_set, deep_set = set(enabled_base), set(enabled_deep)
     channels = []
@@ -113,10 +117,11 @@ def main():
     try:
         data = load_data(args.script, args.defaults, args.base, args.deep)
     except Exception as exc:
+        prefix = "route-registry: " if isinstance(exc, RegistryError) else "defaults: "
         data = {
             "enabledByDefault": [],
             "enabledForDeep": [],
-            "defaults_error": str(exc),
+            "defaults_error": prefix + str(exc),
             "channels": [],
         }
 
@@ -138,7 +143,11 @@ def main():
             state = " [default-on]" if channel["default_on"] else " [not-default]"
         print(f"  {channel['key']:10s} {channel['tier']:4s}  {channel['name']}{state}")
     if data["defaults_error"]:
-        print(f"\n  默认启用配置有误：{data['defaults_error']}")
+        error = data["defaults_error"]
+        if error.startswith("route-registry: "):
+            print(f"\n  路由注册表不一致（改代码，不是改配置）：{error[len('route-registry: '):]}")
+        else:
+            print(f"\n  默认启用配置有误：{error[len('defaults: '):]}")
     print('\n  用法: fanout.sh "<query>" [--deep] [--n N] [--on key1,key2] [--en "<english>"]')
     return 2 if data["defaults_error"] else 0
 
