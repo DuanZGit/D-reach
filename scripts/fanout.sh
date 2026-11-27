@@ -1509,8 +1509,9 @@ for key, name, note, fn, deep_only in SECTIONS:
         skipped.append(key); mark(key, "skip")
         continue
     if skip == "captcha":
-        print(f"### 🔇 {name} —— 平台风控要验证码（等几小时或换个词；不影响其余通道）\n")
-        skipped.append(key); mark(key, "skip")
+        print(f"### 🔇 {name} —— 平台风控要验证码，已挂起 6 小时不再打"
+              f"（{NEEDS['antibot']}；`--force` 可强跑；不影响其余通道）\n")
+        failed.append(key); mark(key, "fail", "antibot")
         continue
     if skip == "not-configured":
         v = health.get(key)
